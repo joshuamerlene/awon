@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AWON · The Rival Is Me</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --surface: #111111;
+    --border: #1e1e1e;
+    --accent: #c8f135;
+    --accent-dim: #8aaa1f;
+    --red: #ff4444;
+    --text: #e8e8e8;
+    --muted: #666;
+    --online: #4ade80;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', 'Helvetica Neue', sans-serif; font-size: 14px; min-height: 100vh; }
+
+  /* ── Auth overlay ── */
+  #auth-overlay { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 999; }
+  #auth-overlay.hidden { display: none; }
+  .auth-box { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 40px; width: 320px; text-align: center; }
+  .auth-box h2 { color: var(--accent); letter-spacing: 0.2em; font-size: 12px; margin-bottom: 24px; }
+  .auth-box input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 12px 16px; border-radius: 8px; font-size: 14px; margin-bottom: 12px; outline: none; }
+  .auth-box input:focus { border-color: var(--accent); }
+  .auth-box button { width: 100%; background: var(--accent); color: #000; border: none; padding: 12px; border-radius: 8px; font-weight: 700; cursor: pointer; letter-spacing: 0.05em; }
+
+  /* ── Header ── */
+  header { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); z-index: 100; }
+  .logo { font-size: 11px; font-weight: 700; letter-spacing: 0.3em; color: var(--accent); }
+  .status-pill { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--online); animation: pulse 2s infinite; }
+  .dot.offline { background: var(--red); animation: none; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .last-cycle { font-size: 11px; color: var(--muted); }
+
+  /* ── Main grid ── */
+  .grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto auto; gap: 1px; background: var(--border); }
+  @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+
+  /* ── Panels ── */
+  .panel { background: var(--surface); padding: 24px; }
+  .panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+  .panel-title { font-size: 10px; font-weight: 700; letter-spacing: 0.25em; color: var(--muted); text-transform: uppercase; }
+  .badge { background: var(--red); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 99px; }
+  .badge.green { background: var(--online); color: #000; }
+
+  /* ── Budget widget ── */
+  .budget-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .budget-item label { font-size: 10px; color: var(--muted); letter-spacing: 0.1em; display: block; margin-bottom: 4px; }
+  .budget-item .value { font-size: 24px; font-weight: 700; color: var(--accent); }
+  .budget-item .value.small { font-size: 16px; color: var(--text); }
+
+  /* ── Strategy ── */
+  .strategy-text { font-size: 14px; line-height: 1.6; color: var(--text); background: var(--bg); border-left: 3px solid var(--accent); padding: 12px 16px; border-radius: 0 8px 8px 0; margin-bottom: 16px; }
+  .next-actions { display: flex; flex-direction: column; gap: 8px; }
+  .next-action { font-size: 12px; color: var(--muted); padding: 8px 12px; background: var(--bg); border-radius: 6px; border: 1px solid var(--border); }
+
+  /* ── Blockers ── */
+  .blockers-panel { grid-column: 1 / -1; }
+  .no-blockers { text-align: center; padding: 40px; color: var(--muted); font-size: 13px; }
+  .no-blockers span { font-size: 28px; display: block; margin-bottom: 8px; }
+  .blocker-card { background: var(--bg); border: 1px solid #2a1a00; border-left: 3px solid #f59e0b; border-radius: 8px; padding: 20px; margin-bottom: 12px; }
+  .blocker-card.resolved { border-left-color: var(--online); opacity: 0.6; }
+  .blocker-title { font-weight: 700; font-size: 14px; margin-bottom: 8px; color: #f59e0b; }
+  .blocker-card.resolved .blocker-title { color: var(--online); }
+  .blocker-context { font-size: 12px; color: var(--muted); line-height: 1.5; margin-bottom: 16px; }
+  .blocker-options { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .option-btn { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; transition: all 0.15s; }
+  .option-btn:hover, .option-btn.selected { background: var(--accent); color: #000; border-color: var(--accent); }
+  .blocker-input { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: 6px; font-size: 13px; resize: vertical; min-height: 60px; outline: none; margin-bottom: 12px; }
+  .blocker-input:focus { border-color: var(--accent); }
+  .resolve-btn { background: var(--accent); color: #000; border: none; padding: 10px 20px; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 13px; }
+  .resolve-btn:hover { opacity: 0.85; }
+  .resolution-display { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; font-size: 12px; color: var(--online); }
+  .blocker-time { font-size: 10px; color: var(--muted); margin-top: 8px; }
+
+  /* ── Activity log ── */
+  .log-feed { display: flex; flex-direction: column; gap: 4px; max-height: 400px; overflow-y: auto; }
+  .log-entry { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); align-items: flex-start; }
+  .log-entry:last-child { border-bottom: none; }
+  .log-type { font-size: 9px; font-weight: 700; letter-spacing: 0.1em; padding: 2px 6px; border-radius: 4px; white-space: nowrap; flex-shrink: 0; margin-top: 1px; }
+  .log-type.action { background: #1a2a1a; color: var(--online); }
+  .log-type.decision { background: #1a1a2a; color: #818cf8; }
+  .log-type.system { background: #1a1a1a; color: var(--muted); }
+  .log-type.error { background: #2a1a1a; color: var(--red); }
+  .log-type.blocker { background: #2a1e00; color: #f59e0b; }
+  .log-type.sub-agent { background: #1a2020; color: #22d3ee; }
+  .log-message { font-size: 12px; color: var(--text); line-height: 1.4; }
+  .log-time { font-size: 10px; color: var(--muted); white-space: nowrap; flex-shrink: 0; margin-left: auto; }
+
+  /* ── Sandbox ── */
+  .sandbox-section { margin-bottom: 20px; }
+  .sandbox-section h4 { font-size: 10px; font-weight: 700; letter-spacing: 0.2em; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; }
+  .learning-item { font-size: 12px; color: var(--text); padding: 8px 12px; background: var(--bg); border-radius: 6px; margin-bottom: 6px; border-left: 2px solid var(--accent-dim); }
+  .learning-time { font-size: 10px; color: var(--muted); display: block; margin-top: 2px; }
+
+  /* ── Refresh ── */
+  .refresh-btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; }
+  .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- Auth -->
+<div id="auth-overlay">
+  <div class="auth-box">
+    <h2>AWON · THE RIVAL IS ME</h2>
+    <input type="password" id="auth-input" placeholder="Dashboard password" />
+    <button onclick="login()">Enter</button>
+    <p id="auth-error" style="color:#ff4444;font-size:12px;margin-top:12px;display:none;">Wrong password.</p>
+  </div>
+</div>
+
+<!-- Header -->
+<header>
+  <div class="logo">AWON · THE RIVAL IS ME OPERATIONS</div>
+  <div style="display:flex;align-items:center;gap:20px;">
+    <div class="status-pill">
+      <div class="dot" id="status-dot"></div>
+      <span id="status-text">Connecting...</span>
+    </div>
+    <span class="last-cycle" id="last-cycle"></span>
+    <button class="refresh-btn" onclick="loadAll()">↻ Refresh</button>
+  </div>
+</header>
+
+<!-- Main content (hidden until auth) -->
+<div id="main-content" style="display:none;">
+
+  <!-- Budget + Strategy row -->
+  <div class="grid">
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Budget</span>
+        <span id="cycle-badge" class="badge green">Cycle #0</span>
+      </div>
+      <div class="budget-grid">
+        <div class="budget-item">
+          <label>AVAILABLE</label>
+          <div class="value" id="budget-available">—</div>
+        </div>
+        <div class="budget-item">
+          <label>AD CAP</label>
+          <div class="value small" id="budget-adcap">—</div>
+        </div>
+        <div class="budget-item">
+          <label>NET PROFIT</label>
+          <div class="value small" id="budget-profit">—</div>
+        </div>
+        <div class="budget-item">
+          <label>PAYOUT OWED</label>
+          <div class="value small" id="budget-payout">—</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Awon's Current Focus</span>
+      </div>
+      <div class="strategy-text" id="strategy-text">Loading...</div>
+      <div class="next-actions" id="next-actions"></div>
+    </div>
+
+    <!-- Blockers (full width) -->
+    <div class="panel blockers-panel">
+      <div class="panel-header">
+        <span class="panel-title">Needs Your Input</span>
+        <span class="badge" id="blocker-badge" style="display:none;"></span>
+      </div>
+      <div id="blockers-container">
+        <div class="no-blockers"><span>✓</span>No blockers. Awon is running free.</div>
+      </div>
+    </div>
+
+    <!-- Activity Log -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Activity Log</span>
+      </div>
+      <div class="log-feed" id="log-feed">
+        <div style="color:var(--muted);text-align:center;padding:20px;">Loading...</div>
+      </div>
+    </div>
+
+    <!-- Sandbox -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Awon's Sandbox</span>
+      </div>
+      <div id="sandbox-container">
+        <div style="color:var(--muted);text-align:center;padding:20px;">Loading...</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let TOKEN = localStorage.getItem("awon_token") || "";
+
+function login() {
+  const pw = document.getElementById("auth-input").value;
+  TOKEN = pw;
+  loadAll();
+}
+
+async function apiFetch(path) {
+  const res = await fetch(path, { headers: { "x-dashboard-token": TOKEN } });
+  if (res.status === 401) { showAuth(); throw new Error("Unauthorized"); }
+  return res.json();
+}
+
+function showAuth() {
+  document.getElementById("auth-overlay").classList.remove("hidden");
+  document.getElementById("main-content").style.display = "none";
+  localStorage.removeItem("awon_token");
+}
+
+function hideAuth() {
+  document.getElementById("auth-overlay").classList.add("hidden");
+  document.getElementById("main-content").style.display = "block";
+  localStorage.setItem("awon_token", TOKEN);
+}
+
+function relativeTime(iso) {
+  if (!iso) return "never";
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+async function loadStatus() {
+  try {
+    const s = await apiFetch("/api/status");
+    hideAuth();
+    document.getElementById("status-dot").className = "dot";
+    document.getElementById("status-text").textContent = "Online";
+    document.getElementById("last-cycle").textContent = `Last cycle ${relativeTime(s.lastCycle)}`;
+    document.getElementById("cycle-badge").textContent = `Cycle #${s.cycleCount || 0}`;
+    document.getElementById("budget-available").textContent = `$${s.budget.availableBudgetUsd}`;
+    document.getElementById("budget-adcap").textContent = `$${s.budget.adCapUsd}`;
+    document.getElementById("budget-profit").textContent = `$${s.budget.cumulativeNetProfitUsd}`;
+    document.getElementById("budget-payout").textContent = `$${s.budget.ownerPayoutOwedUsd}`;
+    document.getElementById("strategy-text").textContent = s.strategy || "Initializing...";
+
+    const nextEl = document.getElementById("next-actions");
+    nextEl.innerHTML = (s.nextActions || []).map(a => `<div class="next-action">→ ${a}</div>`).join("");
+  } catch (e) {
+    if (e.message !== "Unauthorized") {
+      document.getElementById("status-dot").className = "dot offline";
+      document.getElementById("status-text").textContent = "Offline";
+    }
+  }
+}
+
+async function loadBlockers() {
+  try {
+    const blockers = await apiFetch("/api/blockers");
+    const pending = blockers.filter(b => !b.resolution);
+    const badge = document.getElementById("blocker-badge");
+    const container = document.getElementById("blockers-container");
+
+    if (pending.length > 0) {
+      badge.style.display = "inline";
+      badge.textContent = pending.length;
+    } else {
+      badge.style.display = "none";
+    }
+
+    if (blockers.length === 0) {
+      container.innerHTML = `<div class="no-blockers"><span>✓</span>No blockers. Awon is running free.</div>`;
+      return;
+    }
+
+    container.innerHTML = pending.concat(blockers.filter(b => b.resolution).slice(0, 3))
+      .map(b => `
+      <div class="blocker-card ${b.resolution ? 'resolved' : ''}" id="card-${b.id}">
+        <div class="blocker-title">${b.title}</div>
+        <div class="blocker-context">${b.context}</div>
+        ${b.resolution ? `
+          <div class="resolution-display">✓ Resolved: ${b.resolution}</div>
+        ` : `
+          ${b.options?.length ? `
+            <div class="blocker-options">
+              ${b.options.map(o => `<button class="option-btn" onclick="selectOption('${b.id}', this, '${o.replace(/'/g,"\\'")}')">  ${o}</button>`).join("")}
+            </div>
+          ` : ""}
+          <textarea class="blocker-input" id="input-${b.id}" placeholder="Type your response or select an option above..."></textarea>
+          <button class="resolve-btn" onclick="resolve('${b.id}')">Send to Awon →</button>
+        `}
+        <div class="blocker-time">${b.resolution ? `Resolved ${relativeTime(b.resolvedAt)}` : `Added ${relativeTime(b.createdAt)}`}</div>
+      </div>
+    `).join("");
+  } catch(e) {}
+}
+
+function selectOption(id, btn, value) {
+  document.querySelectorAll(`#card-${id} .option-btn`).forEach(b => b.classList.remove("selected"));
+  btn.classList.add("selected");
+  document.getElementById(`input-${id}`).value = value;
+}
+
+async function resolve(id) {
+  const input = document.getElementById(`input-${id}`);
+  const resolution = input.value.trim();
+  if (!resolution) { input.focus(); return; }
+  try {
+    await fetch(`/api/blockers/${id}/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-dashboard-token": TOKEN },
+      body: JSON.stringify({ resolution }),
+    });
+    loadBlockers();
+  } catch(e) { alert("Failed to resolve. Try again."); }
+}
+
+async function loadLog() {
+  try {
+    const entries = await apiFetch("/api/log?limit=50");
+    document.getElementById("log-feed").innerHTML = entries.map(e => `
+      <div class="log-entry">
+        <span class="log-type ${e.type}">${e.type}</span>
+        <span class="log-message">${e.message}</span>
+        <span class="log-time">${relativeTime(e.timestamp)}</span>
+      </div>
+    `).join("") || `<div style="color:var(--muted);text-align:center;padding:20px;">No activity yet.</div>`;
+  } catch(e) {}
+}
+
+async function loadSandbox() {
+  try {
+    const m = await apiFetch("/api/memory");
+    const container = document.getElementById("sandbox-container");
+    container.innerHTML = `
+      ${m.experiments?.filter(e => e.status === "active").length ? `
+        <div class="sandbox-section">
+          <h4>Active Experiments (${m.experiments.filter(e=>e.status==="active").length})</h4>
+          ${m.experiments.filter(e=>e.status==="active").map(e => `
+            <div class="learning-item">${e.hypothesis || e.description || "Experiment"}</div>
+          `).join("")}
+        </div>
+      ` : ""}
+      ${m.learnings?.length ? `
+        <div class="sandbox-section">
+          <h4>Confirmed Learnings</h4>
+          ${m.learnings.slice(0, 6).map(l => `
+            <div class="learning-item">
+              ${l.insight}
+              <span class="learning-time">${relativeTime(l.date)}</span>
+            </div>
+          `).join("")}
+        </div>
+      ` : ""}
+      ${m.contentNotes?.workingFormats?.length ? `
+        <div class="sandbox-section">
+          <h4>Content Insights</h4>
+          ${m.contentNotes.workingFormats.map(f => `<div class="learning-item">${f}</div>`).join("")}
+        </div>
+      ` : `<div style="color:var(--muted);font-size:12px;">Sandbox builds as Awon learns. Check back after the first few cycles.</div>`}
+    `;
+  } catch(e) {}
+}
+
+async function loadAll() {
+  await loadStatus();
+  await Promise.all([loadBlockers(), loadLog(), loadSandbox()]);
+}
+
+// Try auto-login with stored token
+if (TOKEN) loadAll();
+else document.getElementById("auth-overlay").classList.remove("hidden");
+
+// Auto-refresh every 30s
+setInterval(loadAll, 30000);
+
+// Enter key on auth
+document.getElementById("auth-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") login();
+});
+</script>
+</body>
+</html>
