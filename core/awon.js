@@ -21,8 +21,11 @@ import { log } from "./logger.js";
 import { runProductAgent } from "../agents/product.js";
 import { runContentAgent } from "../agents/content.js";
 import { runAnalyticsAgent } from "../agents/analytics.js";
+import { runStoreAgent } from "../agents/store.js";
+import { runInnerLoop } from "./innerLoop.js";
 import * as shopify from "../integrations/shopify.js";
 import * as tiktok from "../integrations/tiktok.js";
+import * as printify from "../integrations/printify.js";
 
 export async function runCycle() {
   log("system", "=== Awon cycle starting ===");
@@ -75,6 +78,10 @@ Describe in plain text what you will do now to continue this thread, given his i
   }
 
   // ── 3. Strategic decision — what does Awon focus on this cycle? ───────────
+  // Store agent runs weekly (every 7th cycle) — visual changes shouldn't be constant
+  const cycleCount = (memory.cycleCount || 0) + 1;
+  const runStoreAgentThisCycle = cycleCount % 7 === 1; // cycle 1, 8, 15, 22...
+
   let strategy;
   try {
     strategy = await thinkJSON({
@@ -85,12 +92,13 @@ Your sandbox/memory:
 ${JSON.stringify(memory, null, 2)}
 
 Current data:
-- Products in catalog: ${products.length}
+- Products in catalog: ${products.length} (if 0, catalog was intentionally cleared — your job is to rebuild it via Printify POD)
 - Recent orders (24h): ${orders.length}
 - TikTok videos available: ${videos.length}
 - Budget available: $${ledger.getAvailable().toFixed(2)}
 - Ad cap: $${ledger.getAdCap().toFixed(2)}
 - Pending blockers (don't act on these, just know they exist): ${pendingBlockers.map(b => b.title).join(", ") || "none"}
+- Store design agent running this cycle: ${runStoreAgentThisCycle}
 
 Return JSON:
 {
@@ -109,6 +117,7 @@ Return JSON:
 
   // Update strategy in memory
   memory.strategy = strategy.focus;
+  memory.cycleCount = cycleCount;
 
   // ── 4. Run sub-agents ──────────────────────────────────────────────────────
   let productRecs = null, contentPlan = null, analyticsInsights = null;
@@ -140,6 +149,22 @@ Return JSON:
     }
   }
 
+  // Store agent — runs weekly, not every cycle
+  if (runStoreAgentThisCycle) {
+    try {
+      const storeResult = await runStoreAgent({ memory });
+      if (!storeResult.skipped) {
+        log("sub-agent", `Store agent completed — ${storeResult.patchesApplied} setting(s) changed, ${storeResult.pagesUpdated} page(s) updated`);
+        if (storeResult.heroTextSuggestion) {
+          memory.contentNotes = memory.contentNotes || {};
+          memory.contentNotes.heroText = storeResult.heroTextSuggestion;
+        }
+      }
+    } catch (err) {
+      log("error", `Store agent failed: ${err.message}`);
+    }
+  }
+
   // ── 5. Execute catalog actions ─────────────────────────────────────────────
   if (productRecs) {
     for (const reprice of productRecs.repriceSuggestions || []) {
@@ -160,12 +185,25 @@ Return JSON:
       }
     }
 
-    // New product candidates that need a supplier app — park as blocker if no supplier wired
-    if ((productRecs.newProductCandidates || []).length > 0 && !process.env.DROPSHIP_APP_NAME) {
+    // Log POD products that were created this cycle
+    if ((productRecs.createdPODProducts || []).length > 0) {
+      log("action", `POD products created this cycle: ${productRecs.createdPODProducts.map(p => `"${p.title}"`).join(", ")}`);
+      // Store content angles in memory for content agent to pick up
+      memory.contentNotes = memory.contentNotes || {};
+      memory.contentNotes.newPODProducts = [
+        ...(memory.contentNotes.newPODProducts || []),
+        ...productRecs.createdPODProducts,
+      ].slice(-10); // keep last 10
+    }
+
+    // Non-POD dropship candidates — park as blocker if significant and no supplier wired
+    const dropshipCandidates = productRecs.newDropshipCandidates || [];
+    const urgentDropship = dropshipCandidates.filter(p => p.urgency === "add now");
+    if (urgentDropship.length > 0 && !process.env.ZENDROP_API_KEY) {
       addBlocker({
-        title: "New product candidates ready — need dropship supplier decision",
-        context: `Product agent identified ${productRecs.newProductCandidates.length} strong candidates: ${productRecs.newProductCandidates.map(p => p.description).join("; ")}. Can't list them yet without a dropship app connected.`,
-        options: ["Connect Zendrop (recommended)", "Connect DSers (AliExpress)", "Connect AutoDS", "Skip for now"],
+        title: "Dropship product candidates ready — need supplier decision",
+        context: `Product agent identified ${urgentDropship.length} strong non-POD candidates: ${urgentDropship.map(p => p.description).join("; ")}. Need a dropship supplier to list.`,
+        options: ["Connect Zendrop", "Connect DSers (AliExpress)", "Connect AutoDS", "Skip — focus on Printify POD only"],
         thread: "Once supplier is chosen, I'll list these products immediately.",
       });
     }
@@ -253,8 +291,26 @@ Return JSON with ONLY the fields that should change:
     log("error", `Memory update failed: ${err.message}`);
   }
 
+  // Save memory snapshot before inner loop so sub-agents have current state
   saveMemory(memory);
-  log("system", `=== Cycle complete. Budget: $${ledger.getAvailable().toFixed(2)} ===`);
+
+  // ── 9. Inner work loop — Awon keeps working until time runs out ────────────
+  try {
+    // Refresh products list so inner loop sees any products created this cycle
+    const freshProducts = await shopify.getProducts().catch(() => products);
+    const loopResult = await runInnerLoop({
+      memory,
+      products: freshProducts,
+      orders,
+      ledger,
+    });
+    log("system", `Inner loop: ${loopResult.tasksCompleted} task(s) completed in ${loopResult.durationMinutes}min`);
+  } catch (err) {
+    log("error", `Inner loop crashed: ${err.message}`);
+  }
+
+  saveMemory(memory);
+  log("system", `=== Full cycle complete. Budget: $${ledger.getAvailable().toFixed(2)} ===`);
 }
 
 function hoursAgo(h) {

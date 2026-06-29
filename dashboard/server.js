@@ -16,6 +16,8 @@ import { getAllBlockers, resolveBlocker, getPendingBlockers } from "../core/queu
 import { getLog } from "../core/logger.js";
 import { loadMemory } from "../core/memory.js";
 import { Ledger } from "../core/ledger.js";
+import { getContentQueue } from "../agents/content.js";
+import * as shopify from "../integrations/shopify.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -93,6 +95,29 @@ export function startDashboard() {
   app.get("/api/memory", (req, res) => {
     try {
       res.json(loadMemory());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Content Queue ─────────────────────────────────────────────────────────
+  app.get("/api/content-queue", (req, res) => {
+    try {
+      const queue = getContentQueue();
+      const status = req.query.status; // filter by ?status=pending|posted
+      const items = status ? queue.filter(i => i.status === status) : queue;
+      res.json({ total: items.length, items: items.reverse() }); // newest first
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Archive All Products ──────────────────────────────────────────────────
+  // One-time nuclear option: archive all active products so Awon rebuilds from scratch.
+  app.post("/api/archive-all-products", async (req, res) => {
+    try {
+      const archived = await shopify.archiveAllProducts();
+      res.json({ success: true, count: archived.length, products: archived });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

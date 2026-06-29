@@ -4,3 +4,4 @@ config/.env
 .env
 *.log
 .DS_Store
+push-to-github.bat

@@ -82,3 +82,125 @@ export async function getProductPerformance(productId, sinceISO) {
   }
   return { productId, unitsSold: units, revenue: +revenue.toFixed(2) };
 }
+
+/**
+ * Archive ALL active products in the store in one call.
+ * Returns array of archived product IDs.
+ * Used when resetting the catalog to let Awon rebuild from scratch.
+ */
+export async function archiveAllProducts() {
+  const products = await getProducts();
+  const archived = [];
+  for (const p of products) {
+    try {
+      await archiveProduct(p.id);
+      archived.push({ id: p.id, title: p.title });
+    } catch (err) {
+      // Continue even if one fails
+    }
+  }
+  return archived;
+}
+
+// ── Theme / Store Design ───────────────────────────────────────────────────────
+// Requires scopes: read_themes, write_themes
+// Add these in Shopify Admin → Apps → [your app] → Edit permissions → save → copy new token
+
+/**
+ * Get all themes. The active one has role: "main".
+ */
+export async function getThemes() {
+  const data = await req("/themes.json");
+  return data?.themes || [];
+}
+
+/**
+ * Get the currently active (published) theme.
+ */
+export async function getActiveTheme() {
+  const themes = await getThemes();
+  return themes.find(t => t.role === "main") || themes[0] || null;
+}
+
+/**
+ * Get a specific asset from a theme (e.g. config/settings_data.json).
+ * @param {number} themeId
+ * @param {string} assetKey  e.g. "config/settings_data.json"
+ */
+export async function getThemeAsset(themeId, assetKey) {
+  const data = await req(`/themes/${themeId}/assets.json?asset[key]=${encodeURIComponent(assetKey)}`);
+  return data?.asset || null;
+}
+
+/**
+ * Update a theme asset.
+ * @param {number} themeId
+ * @param {string} assetKey
+ * @param {string} value  — string content of the file
+ */
+export async function updateThemeAsset(themeId, assetKey, value) {
+  const data = await req(`/themes/${themeId}/assets.json`, {
+    method: "PUT",
+    body: JSON.stringify({ asset: { key: assetKey, value } }),
+  });
+  return data?.asset;
+}
+
+/**
+ * Get the active theme's settings_data.json as a parsed object.
+ * This controls colors, fonts, section content, hero images, banner text, etc.
+ */
+export async function getThemeSettings() {
+  const theme = await getActiveTheme();
+  if (!theme) throw new Error("No active theme found.");
+  const asset = await getThemeAsset(theme.id, "config/settings_data.json");
+  if (!asset?.value) throw new Error("settings_data.json not found in theme.");
+  return { themeId: theme.id, themeName: theme.name, settings: JSON.parse(asset.value) };
+}
+
+/**
+ * Write updated settings back to the active theme.
+ * @param {number} themeId
+ * @param {object} settings  — full settings_data.json object (not a partial patch)
+ */
+export async function updateThemeSettings(themeId, settings) {
+  return updateThemeAsset(themeId, "config/settings_data.json", JSON.stringify(settings, null, 2));
+}
+
+/**
+ * List all assets in a theme (useful for Awon to see what's customizable).
+ */
+export async function listThemeAssets(themeId) {
+  const data = await req(`/themes/${themeId}/assets.json`);
+  return data?.assets || [];
+}
+
+/**
+ * Get all store pages (About, Terms, etc.)
+ */
+export async function getPages() {
+  const data = await req("/pages.json");
+  return data?.pages || [];
+}
+
+/**
+ * Update a store page.
+ */
+export async function updatePage(pageId, updates) {
+  const data = await req(`/pages/${pageId}.json`, {
+    method: "PUT",
+    body: JSON.stringify({ page: { id: pageId, ...updates } }),
+  });
+  return data?.page;
+}
+
+/**
+ * Create a new store page.
+ */
+export async function createPage({ title, body_html, handle }) {
+  const data = await req("/pages.json", {
+    method: "POST",
+    body: JSON.stringify({ page: { title, body_html, handle } }),
+  });
+  return data?.page;
+}
