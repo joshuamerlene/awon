@@ -98,6 +98,49 @@ export function startDashboard() {
     }
   });
 
+  // ── Shopify OAuth Callback ─────────────────────────────────────────────────
+  // Called by Shopify after store owner approves app install.
+  // Exchanges the one-time code for a permanent Admin API access token.
+  app.get("/auth/callback", async (req, res) => {
+    const { code, shop } = req.query;
+    if (!code || !shop) return res.status(400).send("Missing code or shop parameters.");
+
+    try {
+      const clientId = process.env.SHOPIFY_APP_CLIENT_ID;
+      const clientSecret = process.env.SHOPIFY_APP_CLIENT_SECRET;
+
+      if (!clientId || !clientSecret) {
+        // Fallback: display the code so it can be exchanged manually
+        return res.send(
+          `<h1>OAuth Code Received</h1><p><b>Shop:</b> ${shop}</p><p><b>Code:</b> <code>${code}</code></p>` +
+          `<p>Set SHOPIFY_APP_CLIENT_ID + SHOPIFY_APP_CLIENT_SECRET in Railway env vars, then reinstall.</p>`
+        );
+      }
+
+      const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code }),
+      });
+
+      const tokenData = await tokenRes.json();
+
+      if (tokenData.access_token) {
+        res.send(
+          `<h1>✅ Shopify Connected!</h1>` +
+          `<p><b>Access Token:</b> <code style="word-break:break-all">${tokenData.access_token}</code></p>` +
+          `<p><b>Scope:</b> ${tokenData.scope}</p>` +
+          `<p>Add <code>SHOPIFY_ADMIN_API_ACCESS_TOKEN=${tokenData.access_token}</code> and ` +
+          `<code>SHOPIFY_STORE_DOMAIN=${shop}</code> to Railway environment variables.</p>`
+        );
+      } else {
+        res.send(`<h1>Token Exchange Error</h1><pre>${JSON.stringify(tokenData, null, 2)}</pre>`);
+      }
+    } catch (err) {
+      res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
+    }
+  });
+
   app.listen(PORT, () => {
     console.log(`[Dashboard] Awon dashboard running on port ${PORT}`);
   });
