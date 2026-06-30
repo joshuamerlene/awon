@@ -14,7 +14,7 @@
 import { thinkJSON, PERSONAS } from "../core/claude.js";
 import { log } from "../core/logger.js";
 import * as shopify from "../integrations/shopify.js";
-import * as printify from "../integrations/printify.js";
+import * as printful from "../integrations/printful.js";
 
 // Products that should be replaced by POD equivalents (titles are partial matches)
 const LEGACY_PRODUCTS_TO_REPLACE = [
@@ -62,7 +62,7 @@ Brand memory / current strategy:
 ${memory.strategy || "No strategy set yet"}
 ${(memory.learnings || []).slice(0, 5).map(l => `- ${l.insight}`).join("\n")}
 
-Printify available: ${printify.isConfigured() ? "YES — can create POD products autonomously" : "NO — PRINTIFY_API_KEY not set"}
+Printful available: ${printful.isConfigured() ? "YES — can create POD products autonomously (Printful is already connected to Shopify)" : "NO — PRINTFUL_API_KEY not set"}
 Available budget: $${ledger.getAvailable().toFixed(2)}
 
 Return JSON:
@@ -76,7 +76,7 @@ Return JSON:
   "legacyToArchive": ["productId"],
   "newPODProducts": [
     {
-      "printifySearchKeyword": "gym shirt",
+      "printfulSearchKeyword": "gym shirt",
       "suggestedTitle": "DISCIPLINE OR NOTHING — Training Tee",
       "suggestedDescription": "HTML description in The Rival Is Me voice",
       "retailPrice": 34.99,
@@ -97,7 +97,7 @@ Return JSON:
   ]
 }
 
-Be decisive. If the catalog needs cleanup, call it. If Printify is available, recommend 2-3 specific POD fitness products to add NOW.`,
+Be decisive. If the catalog needs cleanup, call it. If Printful is available, recommend 2-3 specific POD fitness products to add NOW. Use printfulSearchKeyword values like: "t-shirt", "hoodie", "shorts", "joggers", "tank", "hat", "sweatshirt".`,
   });
 
   log("sub-agent", `Analysis done. ${result.newPODProducts?.length || 0} POD candidates, ${result.kill?.length || 0} to kill, ${result.legacyToArchive?.length || 0} legacy to archive.`);
@@ -138,71 +138,51 @@ Be decisive. If the catalog needs cleanup, call it. If Printify is available, re
     }
   }
 
-  // ── 6. Create new POD products via Printify ───────────────────────────────
+  // ── 6. Create new POD products via Printful ──────────────────────────────
   const createdPODProducts = [];
 
-  if (printify.isConfigured()) {
+  if (printful.isConfigured()) {
     const urgentPOD = (result.newPODProducts || []).filter(p => p.urgency === "add now");
-    log("sub-agent", `Creating ${urgentPOD.length} urgent POD product(s) via Printify...`);
+    log("sub-agent", `Creating ${urgentPOD.length} urgent POD product(s) via Printful...`);
 
     for (const candidate of urgentPOD) {
       try {
-        // Find blueprint
-        const blueprint = await printify.resolveBlueprintForKeyword(candidate.printifySearchKeyword);
-        log("sub-agent", `Blueprint resolved: "${blueprint.blueprintTitle}" via ${blueprint.providerTitle}`);
+        // Resolve catalog product + variants
+        const catalogProduct = await printful.resolveCatalogProductForKeyword(
+          candidate.printfulSearchKeyword || candidate.printifySearchKeyword || "t-shirt"
+        );
+        log("sub-agent", `Catalog resolved: "${catalogProduct.title}" (${catalogProduct.variants.length} variants)`);
 
-        if (blueprint.variants.length === 0) {
-          log("error", `No variants found for blueprint ${blueprint.blueprintId} — skipping`);
+        if (catalogProduct.variants.length === 0) {
+          log("error", `No variants found for "${candidate.printfulSearchKeyword}" — skipping`);
           continue;
         }
 
-        // Enable the most common sizes/colors — enable all variants at retail price
-        const retailPriceCents = Math.round((candidate.retailPrice || 34.99) * 100);
-        const enabledVariants = blueprint.variants.slice(0, 50).map(v => ({
-          id: v.id,
-          price: retailPriceCents,
-          is_enabled: true,
-        }));
-
-        // Create product (no custom design yet — Printify will use default/blank)
-        const product = await printify.createProduct({
+        // Create sync product — Printful auto-syncs to Shopify
+        const product = await printful.createProduct({
           title: candidate.suggestedTitle,
-          description: candidate.suggestedDescription || `<p>${candidate.suggestedTitle}</p><p>Built for the ones who chose discipline.</p>`,
-          blueprintId: blueprint.blueprintId,
-          printProviderId: blueprint.printProviderId,
-          variants: enabledVariants,
-          printAreas: [
-            {
-              variant_ids: enabledVariants.map(v => v.id),
-              placeholders: [
-                {
-                  position: "front",
-                  images: [], // No design uploaded yet — Awon logs this as a next step
-                },
-              ],
-            },
-          ],
+          description: candidate.suggestedDescription || `<p>${candidate.suggestedTitle}</p><p>Built for the ones who chose discipline. #THERIVALISME</p>`,
+          catalogProductId: catalogProduct.catalogProductId,
+          variants: catalogProduct.variants,
+          retailPrice: candidate.retailPrice || 34.99,
         });
 
-        // Publish to Shopify
-        await printify.publishProduct(product.id);
-
         createdPODProducts.push({
-          printifyId: product.id,
+          printfulId: product.id,
           title: candidate.suggestedTitle,
-          blueprintTitle: blueprint.blueprintTitle,
+          catalogTitle: catalogProduct.title,
           retailPrice: candidate.retailPrice,
           contentAngle: candidate.contentAngle,
         });
 
-        log("action", `POD product live: "${candidate.suggestedTitle}" — Printify ID ${product.id}`);
+        log("action", `POD product live: "${candidate.suggestedTitle}" — Printful ID ${product.id} (synced to Shopify)`);
 
       } catch (err) {
-        log("error", `Printify product creation failed for "${candidate.printifySearchKeyword}": ${err.message}`);
+        log("error", `Printful product creation failed for "${candidate.printfulSearchKeyword}": ${err.message}`);
       }
     }
   } else {
-    log("system", "Printify not configured (PRINTIFY_API_KEY missing) — POD product creation skipped. Set PRINTIFY_API_KEY in Railway to unlock.");
+    log("system", "Printful not configured (PRINTFUL_API_KEY missing) — POD product creation skipped. Set PRINTFUL_API_KEY in Railway to unlock.");
   }
 
   return {
