@@ -25,7 +25,7 @@ import { runStoreAgent } from "../agents/store.js";
 import { runInnerLoop } from "./innerLoop.js";
 import * as shopify from "../integrations/shopify.js";
 import * as tiktok from "../integrations/tiktok.js";
-import * as printify from "../integrations/printify.js";
+import * as printful from "../integrations/printful.js";
 
 export async function runCycle() {
   log("system", "=== Awon cycle starting ===");
