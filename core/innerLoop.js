@@ -20,7 +20,7 @@ import { thinkJSON, think, PERSONAS } from "./claude.js";
 import { log } from "./logger.js";
 import { addLearning } from "./memory.js";
 import * as shopify from "../integrations/shopify.js";
-import * as printify from "../integrations/printify.js";
+import * as printful from "../integrations/printful.js";
 
 const MAX_MINUTES = Number(process.env.INNER_LOOP_MINUTES || 40);
 const MAX_TASKS   = Number(process.env.INNER_LOOP_MAX_TASKS || 10);
@@ -31,15 +31,15 @@ const MAX_TASKS   = Number(process.env.INNER_LOOP_MAX_TASKS || 10);
 
 const ACTIONS = {
 
-  research_printify: {
-    description: "Search Printify catalog for new fitness POD product opportunities. Research blueprints, providers, price points. Add strong candidates to memory for next product creation.",
+  research_printful: {
+    description: "Research Printful catalog for new fitness POD product opportunities. Explore product types, price points, margins. Add strong candidates to memory for next product creation.",
     async execute({ memory }) {
-      const keywords = ["gym shirt", "tank top", "hoodie fitness", "joggers", "gym bag", "water bottle", "gym shorts", "compression shirt"];
+      const keywords = ["gym shirt", "tank top", "fitness hoodie", "joggers", "gym shorts", "water bottle", "compression shirt", "training tee"];
       const kw = keywords[Math.floor(Math.random() * keywords.length)];
 
       const results = await thinkJSON({
         system: PERSONAS.productAgent,
-        prompt: `Research Printify POD opportunities for The Rival Is Me fitness brand.
+        prompt: `Research Printful POD opportunities for The Rival Is Me fitness brand.
 
 Search keyword to explore: "${kw}"
 
@@ -49,12 +49,14 @@ Based on your knowledge of fitness apparel and POD products, evaluate this categ
 - What messaging angle would make it fly on TikTok?
 - What's the estimated margin at that price?
 
+Printful keyword options: "t-shirt", "hoodie", "shorts", "joggers", "tank", "hat", "sweatshirt", "long sleeve", "beanie"
+
 Return JSON:
 {
   "keyword": "${kw}",
   "topCandidates": [
     {
-      "printifySearchKeyword": "exact search term for Printify",
+      "printfulSearchKeyword": "t-shirt",
       "suggestedTitle": "DISCIPLINE OVER COMFORT — Training Tee",
       "retailPrice": 34.99,
       "estimatedCOGS": 14.00,
@@ -69,8 +71,8 @@ Return JSON:
       });
 
       // Store candidates in memory for product agent to act on
-      memory.printifyCandidates = [
-        ...(memory.printifyCandidates || []),
+      memory.printfulCandidates = [
+        ...(memory.printfulCandidates || []),
         ...results.topCandidates,
       ].slice(-20); // keep last 20 candidates
 
@@ -79,43 +81,31 @@ Return JSON:
   },
 
   create_pod_product: {
-    description: "Take a queued Printify candidate from memory and actually create + publish it to Shopify. Only run if PRINTIFY_API_KEY is set and there are candidates waiting.",
+    description: "Take a queued Printful candidate from memory and actually create + publish it to Shopify. Only run if PRINTFUL_API_KEY is set and there are candidates waiting.",
     async execute({ memory }) {
-      if (!printify.isConfigured()) return "Skipped — PRINTIFY_API_KEY not set.";
+      if (!printful.isConfigured()) return "Skipped — PRINTFUL_API_KEY not set.";
 
-      const candidates = (memory.printifyCandidates || []).filter(c => c.urgency === "add now" && !c.created);
-      if (candidates.length === 0) return "No urgent Printify candidates in queue. Run research_printify first.";
+      const candidates = (memory.printfulCandidates || []).filter(c => c.urgency === "add now" && !c.created);
+      if (candidates.length === 0) return "No urgent Printful candidates in queue. Run research_printful first.";
 
       const candidate = candidates[0];
 
       try {
-        const blueprint = await printify.resolveBlueprintForKeyword(candidate.printifySearchKeyword);
-        const retailPriceCents = Math.round((candidate.retailPrice || 34.99) * 100);
-        const enabledVariants = blueprint.variants.slice(0, 50).map(v => ({
-          id: v.id,
-          price: retailPriceCents,
-          is_enabled: true,
-        }));
+        const catalogProduct = await printful.resolveCatalogProductForKeyword(candidate.printfulSearchKeyword || "t-shirt");
 
-        const product = await printify.createProduct({
+        const product = await printful.createProduct({
           title: candidate.suggestedTitle,
-          description: `<p>${candidate.suggestedTitle}</p><p>Built for the ones who chose discipline. The Rival Is Me.</p>`,
-          blueprintId: blueprint.blueprintId,
-          printProviderId: blueprint.printProviderId,
-          variants: enabledVariants,
-          printAreas: [{
-            variant_ids: enabledVariants.map(v => v.id),
-            placeholders: [{ position: "front", images: [] }],
-          }],
+          description: `<p>${candidate.suggestedTitle}</p><p>Built for the ones who chose discipline. The Rival Is Me. #THERIVALISME</p>`,
+          catalogProductId: catalogProduct.catalogProductId,
+          variants: catalogProduct.variants,
+          retailPrice: candidate.retailPrice || 34.99,
         });
-
-        await printify.publishProduct(product.id);
 
         // Mark as created in memory
         candidate.created = true;
-        candidate.printifyId = product.id;
+        candidate.printfulId = product.id;
 
-        return `Created and published "${candidate.suggestedTitle}" to Shopify (Printify ID: ${product.id})`;
+        return `Created and published "${candidate.suggestedTitle}" to Shopify via Printful (ID: ${product.id})`;
       } catch (err) {
         return `Failed to create "${candidate.suggestedTitle}": ${err.message}`;
       }
@@ -387,7 +377,7 @@ Return JSON:
 
 };
 
-// ── Inner loop orchestrator ───────────────────────────────────────────────────
+// ── Inner loop orchestrator ────────────────────────────────────────────────────
 
 export async function runInnerLoop({ memory, products, orders, ledger }) {
   const startTime = Date.now();
@@ -423,9 +413,9 @@ export async function runInnerLoop({ memory, products, orders, ledger }) {
 
 Current state:
 - Active products in store: ${products.length}
-- Printify configured: ${printify.isConfigured()}
+- Printful configured: ${printful.isConfigured()}
 - Orders today: ${orders.length}
-- Printify candidates queued: ${(memory.printifyCandidates || []).filter(c => !c.created).length}
+- Printful candidates queued: ${(memory.printfulCandidates || []).filter(c => !c.created).length}
 - Weekly plan exists: ${!!memory.weeklyPlan}
 - Current strategy: ${memory.strategy}
 
