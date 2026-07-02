@@ -4,8 +4,8 @@
  * Awon's product arm. This agent:
  *   1. Analyzes the current Shopify catalog
  *   2. Identifies dead weight (archive) and repricing opportunities
- *   3. Researches new POD fitness products via Printify
- *   4. Creates and publishes new Printify products autonomously
+ *   3. Researches new POD fitness products via Printful
+ *   4. Creates and publishes new Printful products autonomously
  *   5. Flags the original non-POD products (bag + journal) for replacement
  *
  * Sub-agents return recommendations AND execute them.
@@ -198,7 +198,7 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
       ...(result.newDropshipCandidates || []),
       ...(result.newPODProducts || []).filter(p => p.urgency !== "add now").map(p => ({
         description: p.suggestedTitle,
-        searchTerms: [p.printifySearchKeyword],
+        searchTerms: [p.printfulSearchKeyword],
         estimatedRetailPrice: p.retailPrice,
         whyItFits: p.contentAngle,
         tiktokViralityScore: "high",

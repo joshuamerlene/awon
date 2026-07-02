@@ -103,8 +103,10 @@ export async function searchCatalog(keyword) {
   )?.[1];
 
   if (catalogId) {
-    const product = await pf(`/products/${catalogId}`);
-    return [product];
+    // GET /products/{id} returns { product: {...}, variants: [...] } — unwrap .product
+    const detail = await pf(`/products/${catalogId}`);
+    if (!detail?.product) return [];
+    return [detail.product];
   }
 
   // Fall back to fetching the first page of catalog and filtering

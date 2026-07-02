@@ -92,7 +92,7 @@ Your sandbox/memory:
 ${JSON.stringify(memory, null, 2)}
 
 Current data:
-- Products in catalog: ${products.length} (if 0, catalog was intentionally cleared — your job is to rebuild it via Printify POD)
+- Products in catalog: ${products.length} (if 0, catalog was intentionally cleared — your job is to rebuild it via Printful POD)
 - Recent orders (24h): ${orders.length}
 - TikTok videos available: ${videos.length}
 - Budget available: $${ledger.getAvailable().toFixed(2)}
@@ -203,7 +203,7 @@ Return JSON:
       addBlocker({
         title: "Dropship product candidates ready — need supplier decision",
         context: `Product agent identified ${urgentDropship.length} strong non-POD candidates: ${urgentDropship.map(p => p.description).join("; ")}. Need a dropship supplier to list.`,
-        options: ["Connect Zendrop", "Connect DSers (AliExpress)", "Connect AutoDS", "Skip — focus on Printify POD only"],
+        options: ["Connect Zendrop", "Connect DSers (AliExpress)", "Connect AutoDS", "Skip — focus on Printful POD only"],
         thread: "Once supplier is chosen, I'll list these products immediately.",
       });
     }

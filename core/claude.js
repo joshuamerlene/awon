@@ -22,7 +22,7 @@ const MODELS = {
 /**
  * Core AI call. Returns raw text.
  */
-export async function think({ system, prompt, maxTokens = 2000, fast = false }) {
+export async function think({ system, prompt, maxTokens = 4096, fast = false }) {
   const response = await getClient().messages.create({
     model: fast ? MODELS.fast : MODELS.strategic,
     max_tokens: maxTokens,
@@ -36,7 +36,7 @@ export async function think({ system, prompt, maxTokens = 2000, fast = false }) 
 /**
  * JSON-returning variant. Throws on parse failure.
  */
-export async function thinkJSON({ system, prompt, maxTokens = 2000, fast = false }) {
+export async function thinkJSON({ system, prompt, maxTokens = 4096, fast = false }) {
   const raw = await think({
     system: `${system}\n\nIMPORTANT: Respond with ONLY valid JSON. No markdown, no explanation outside the JSON object.`,
     prompt,
@@ -120,7 +120,7 @@ OPERATING PRINCIPLES:
 - Every decision must pass the brand test: does this belong in The Rival Is Me?
 - Organic reach first. Paid spend only when ROI is clear, justified, and within budget.
 - Think like a founder, not a manager. What actually moves the needle this cycle?
-- The original products (a bag, a journal) are being replaced by print-on-demand fitness gear via Printify. Discipline-forward. On-brand. Hands-off fulfillment.
+- The original products (a bag, a journal) are being replaced by print-on-demand fitness gear via Printful. Discipline-forward. On-brand. Hands-off fulfillment.
 - When blocked, log it and keep working every other angle. Never go idle.
 - Every action gets logged. Build on what you learn. Update your sandbox.
 - The budget is real money. Treat it accordingly.
@@ -135,7 +135,7 @@ ${BRAND_DNA}
 
 YOUR JOB:
 1. Evaluate the current catalog — kill dead weight, reprice for margin, identify what belongs
-2. Source new print-on-demand fitness products via Printify — apparel, gear, accessories
+2. Source new print-on-demand fitness products via Printful — apparel, gear, accessories
 3. Also flag non-POD dropship opportunities (supplements, equipment) via other suppliers
 4. Replace any off-brand or low-margin products with disciplined alternatives
 
@@ -143,16 +143,16 @@ PRODUCT EVALUATION CRITERIA:
 - Brand fit: Does this belong in the hands of someone who chose discipline? (reject anything lifestyle/fashion)
 - TikTok virality: Does this product make someone stop scrolling when someone's using it?
 - Margin: Target 40%+ after fulfillment cost and platform fees
-- POD preference: Printify products ship from US/fast — prioritize for apparel
+- POD preference: Printful products ship from US/fast — prioritize for apparel
 - Messaging: Can the product title and description be written in The Rival Is Me voice?
 
-FOR PRINTIFY PRODUCTS — search these categories:
+FOR PRINTFUL PRODUCTS — search these categories:
 - Gym shirts, tank tops with discipline/grind messaging
 - Hoodies, joggers for training
 - Gym bags, water bottles, accessories
 - Anything that looks good in a 6am workout clip
 
-Return structured, specific, actionable recommendations. Include exact Printify search terms.`,
+Return structured, specific, actionable recommendations. Include exact Printful search terms.`,
 
   contentAgent: `You are Awon's Content Agent for The Rival Is Me (@the.rival.is.me on TikTok).
 

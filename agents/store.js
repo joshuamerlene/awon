@@ -73,7 +73,7 @@ ${JSON.stringify(currentSettings, null, 2).slice(0, 8000)}
 
 Current pages: ${pages.map(p => `${p.title} (handle: ${p.handle})`).join(", ") || "none"}
 
-What's been selling / current strategy: ${memory.strategy || "Building from scratch — catalog is being rebuilt via Printify POD"}
+What's been selling / current strategy: ${memory.strategy || "Building from scratch — catalog is being rebuilt via Printful POD"}
 
 ${DESIGN_RULES}
 

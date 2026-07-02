@@ -11,7 +11,7 @@
  * - Max 40 minutes per cycle (configurable via INNER_LOOP_MINUTES env var)
  * - Max 10 tasks per session (guards against runaway)
  * - Awon picks from a concrete action menu — no hallucinated capabilities
- * - Every task actually executes: writes to Shopify, Printify, content queue, etc.
+ * - Every task actually executes: writes to Shopify, Printful, content queue, etc.
  * - Session log prevents repeating the same task twice
  * - Awon can declare "done" early if there's nothing valuable left
  */
@@ -346,7 +346,7 @@ Return JSON:
 Current state:
 - Active products: ${products.length}
 - Current strategy: ${memory.strategy}
-- Pending Printify candidates: ${(memory.printifyCandidates || []).length}
+- Pending Printful candidates: ${(memory.printfulCandidates || []).filter(c => !c.created).length}
 - Content queue size: ${memory.contentNotes?.queueSize || "unknown"}
 
 Build a realistic, specific plan. Not aspirational — executable.
