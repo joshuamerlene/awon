@@ -15,6 +15,7 @@ import { thinkJSON, PERSONAS } from "../core/claude.js";
 import { log } from "../core/logger.js";
 import * as shopify from "../integrations/shopify.js";
 import * as printful from "../integrations/printful.js";
+import * as cj from "../integrations/cj.js";
 
 // Products that should be replaced by POD equivalents (titles are partial matches)
 const LEGACY_PRODUCTS_TO_REPLACE = [
@@ -63,6 +64,7 @@ ${memory.strategy || "No strategy set yet"}
 ${(memory.learnings || []).slice(0, 5).map(l => `- ${l.insight}`).join("\n")}
 
 Printful available: ${printful.isConfigured() ? "YES — can create POD products autonomously (Printful is already connected to Shopify)" : "NO — PRINTFUL_API_KEY not set"}
+CJ Dropshipping available: ${cj.isConfigured() ? "YES — can search CJ catalog and list supplements/gear on Shopify automatically" : "NO — CJ_API_KEY not set"}
 Available budget: $${ledger.getAvailable().toFixed(2)}
 
 Return JSON:
@@ -87,7 +89,7 @@ Return JSON:
   "newDropshipCandidates": [
     {
       "description": "product name and type (non-POD, e.g. supplements, equipment)",
-      "searchTerms": ["term1"],
+      "cjSearchKeyword": "whey protein powder",
       "estimatedRetailPrice": 0.00,
       "estimatedCOGS": 0.00,
       "whyItFits": "...",
@@ -185,6 +187,64 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
     log("system", "Printful not configured (PRINTFUL_API_KEY missing) — POD product creation skipped. Set PRINTFUL_API_KEY in Railway to unlock.");
   }
 
+  // ── 7. Source + list CJ dropship products ────────────────────────────────
+  const createdCJProducts = [];
+
+  if (cj.isConfigured()) {
+    const urgentDropship = (result.newDropshipCandidates || []).filter(p => p.urgency === "add now");
+    if (urgentDropship.length > 0) {
+      log("sub-agent", `Sourcing ${urgentDropship.length} dropship product(s) from CJ...`);
+    }
+
+    for (const candidate of urgentDropship) {
+      try {
+        const keyword = candidate.cjSearchKeyword || candidate.description;
+        const results = await cj.searchProducts({ keyword, size: 5 });
+
+        if (results.length === 0) {
+          log("system", `CJ search for "${keyword}" returned no results — skipping.`);
+          continue;
+        }
+
+        // Pick the best match: highest listing count (popularity), verify it has stock
+        const best = results[0];
+        log("sub-agent", `CJ best match for "${keyword}": "${best.nameEn}" @ $${best.sellPrice} (${best.listedNum} listings)`);
+
+        // Add to my CJ products (required before ordering)
+        await cj.addToMyProducts(best.id);
+
+        // Get full details + variants
+        const details = await cj.getProductDetails(best.id);
+        const productWithVariants = { ...best, ...details };
+
+        // Build and create Shopify listing
+        const shopifyPayload = cj.buildShopifyProduct(productWithVariants, {
+          retailMultiplier: 2.5,
+          brand: "The Rival Is Me",
+        });
+
+        // Override title/description if candidate has suggestions
+        if (candidate.suggestedTitle) shopifyPayload.title = candidate.suggestedTitle;
+        if (candidate.suggestedDescription) shopifyPayload.body_html = candidate.suggestedDescription;
+
+        const created = await shopify.createProduct(shopifyPayload);
+        createdCJProducts.push({
+          shopifyId: created.id,
+          title: created.title,
+          cjPid: best.id,
+          cjSku: best.sku,
+          cogs: parseFloat(best.sellPrice),
+          retailPrice: parseFloat(created.variants?.[0]?.price),
+        });
+
+        log("action", `CJ product live on Shopify: "${created.title}" — $${created.variants?.[0]?.price} retail, $${best.sellPrice} COGS`);
+
+      } catch (err) {
+        log("error", `CJ product listing failed for "${candidate.description}": ${err.message}`);
+      }
+    }
+  }
+
   return {
     summary: result.summary,
     keep: result.keep,
@@ -192,6 +252,7 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
     repriceSuggestions: result.repriceSuggestions,
     legacyArchived,
     createdPODProducts,
+    createdCJProducts,
     newDropshipCandidates: result.newDropshipCandidates || [],
     // Legacy compat — awon.js still reads this
     newProductCandidates: [

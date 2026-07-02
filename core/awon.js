@@ -23,9 +23,11 @@ import { runContentAgent } from "../agents/content.js";
 import { runAnalyticsAgent } from "../agents/analytics.js";
 import { runStoreAgent } from "../agents/store.js";
 import { runInnerLoop } from "./innerLoop.js";
+import { runFulfillmentAgent } from "../agents/fulfillment.js";
 import * as shopify from "../integrations/shopify.js";
 import * as tiktok from "../integrations/tiktok.js";
 import * as printful from "../integrations/printful.js";
+import * as cj from "../integrations/cj.js";
 
 export async function runCycle() {
   log("system", "=== Awon cycle starting ===");
@@ -196,16 +198,21 @@ Return JSON:
       ].slice(-10); // keep last 10
     }
 
-    // Non-POD dropship candidates — park as blocker if significant and no supplier wired
+    // Non-POD dropship candidates — list via CJ if configured, otherwise park as blocker
     const dropshipCandidates = productRecs.newDropshipCandidates || [];
     const urgentDropship = dropshipCandidates.filter(p => p.urgency === "add now");
-    if (urgentDropship.length > 0 && !process.env.ZENDROP_API_KEY) {
-      addBlocker({
-        title: "Dropship product candidates ready — need supplier decision",
-        context: `Product agent identified ${urgentDropship.length} strong non-POD candidates: ${urgentDropship.map(p => p.description).join("; ")}. Need a dropship supplier to list.`,
-        options: ["Connect Zendrop", "Connect DSers (AliExpress)", "Connect AutoDS", "Skip — focus on Printful POD only"],
-        thread: "Once supplier is chosen, I'll list these products immediately.",
-      });
+    if (urgentDropship.length > 0) {
+      if (cj.isConfigured()) {
+        // CJ is live — product agent handles listing (see agents/product.js CJ section)
+        log("decision", `${urgentDropship.length} CJ dropship candidate(s) queued for listing this cycle.`);
+      } else {
+        addBlocker({
+          title: "Dropship product candidates ready — need CJ API key",
+          context: `Product agent identified ${urgentDropship.length} strong non-POD candidates: ${urgentDropship.map(p => p.description).join("; ")}. CJ Dropshipping is the connected supplier — just need CJ_API_KEY set in Railway.`,
+          options: ["Add CJ_API_KEY to Railway env vars", "Skip — focus on Printful POD only"],
+          thread: "Once CJ_API_KEY is set, I'll list these products immediately.",
+        });
+      }
     }
   }
 
@@ -247,7 +254,20 @@ Return JSON:
     }
   }
 
-  // ── 7. Reconcile confirmed revenue ─────────────────────────────────────────
+  // ── 7. Auto-fulfill CJ orders ─────────────────────────────────────────────
+  try {
+    const fulfillResult = await runFulfillmentAgent({ orders, memory });
+    if (fulfillResult.fulfilled > 0) {
+      log("sub-agent", `Fulfillment agent: sent ${fulfillResult.fulfilled} order(s) to CJ Dropshipping.`);
+    }
+    if (fulfillResult.errors.length > 0) {
+      for (const err of fulfillResult.errors) log("error", err);
+    }
+  } catch (err) {
+    log("error", `Fulfillment agent crashed: ${err.message}`);
+  }
+
+  // ── 8. Reconcile confirmed revenue (Printful POD) ─────────────────────────
   for (const order of orders.filter(o => o.fulfillment_status === "fulfilled" && o.financial_status === "paid")) {
     const revenue = Number(order.total_price || 0);
     const cogs = Number(order.estimated_cost_of_goods || revenue * 0.4);
