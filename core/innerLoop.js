@@ -213,7 +213,7 @@ Write real captions and hooks — not templates. Make it feel like someone who a
   },
 
   write_blog_post: {
-    description: "Write a full brand-aligned blog post for the Shopify store. Real, personal, discipline-focused. Publish it directly to the store.",
+    description: "Write a full brand-aligned blog post and publish it as a REAL Shopify blog article (shows up in the store's blog feed, not just a static page). Real, personal, discipline-focused.",
     async execute({ memory }) {
       const topic = await think({
         system: PERSONAS.awon,
@@ -239,20 +239,24 @@ Rules:
 - DO NOT mention specific product names or prices
 - Reference "The Rival" (the lazy version of yourself) naturally
 - The tone: like a journal entry crossed with a manifesto
+- Do NOT wrap the output in markdown code fences (no \`\`\`html or \`\`\` anywhere) — raw HTML only, nothing else
 
 Write the full post HTML only.`,
         fast: false,
       });
 
+      // Safety net: strip markdown code fences if the model adds them anyway
+      const cleanHTML = postHTML.trim().replace(/^```(?:html)?\s*/i, "").replace(/```\s*$/i, "").trim();
+
       try {
-        await shopify.createPage({
+        const blog = await shopify.getOrCreateDefaultBlog();
+        const article = await shopify.createArticle(blog.id, {
           title: topic.trim(),
-          body_html: postHTML,
-          handle: topic.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+          body_html: cleanHTML,
+          tags: "discipline, mindset, the rival is me",
         });
-        return `Published blog post: "${topic.trim()}"`;
+        return `Published blog post: "${topic.trim()}" — live at /blogs/${blog.handle}/${article.handle}`;
       } catch (err) {
-        // Blog posts go to pages — try that
         return `Wrote blog post "${topic.trim()}" but couldn't publish: ${err.message}`;
       }
     },

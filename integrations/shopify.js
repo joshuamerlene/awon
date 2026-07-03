@@ -1,6 +1,12 @@
 /**
  * integrations/shopify.js — Shopify Admin REST API
  * Fully implemented. Requires SHOPIFY_ADMIN_API_ACCESS_TOKEN in .env.
+ *
+ * Note: Pages (createPage/updatePage/getPages) and Blog Articles
+ * (getBlogs/createBlog/createArticle/getOrCreateDefaultBlog) are different
+ * Shopify resources. Pages are static, one-off content (About, Terms) and do
+ * NOT show up in a blog feed. Use the Blog Articles functions for anything
+ * meant to read as a real, discoverable blog post.
  */
 
 const DOMAIN  = process.env.SHOPIFY_STORE_DOMAIN;
@@ -203,4 +209,60 @@ export async function createPage({ title, body_html, handle }) {
     body: JSON.stringify({ page: { title, body_html, handle } }),
   });
   return data?.page;
+}
+
+// ── Blog Articles ────────────────────────────────────────────────────────────
+// This is the REAL blog API — distinct from Pages above. Articles created here
+// show up in a blog's feed/RSS and on the storefront (e.g. /blogs/news/my-post).
+// A page created via createPage() does NOT do this even if it "succeeds" — it's
+// just a static page nobody links to. Use these for actual blog content.
+
+/**
+ * Get all blogs on the store (a store usually has one, often called "News").
+ */
+export async function getBlogs() {
+  const data = await req("/blogs.json");
+  return data?.blogs || [];
+}
+
+/**
+ * Create a new blog (rarely needed — most stores already have one).
+ */
+export async function createBlog(title) {
+  const data = await req("/blogs.json", {
+    method: "POST",
+    body: JSON.stringify({ blog: { title } }),
+  });
+  return data?.blog;
+}
+
+/**
+ * Get the store's default blog, creating one if none exists yet.
+ * Caches nothing — cheap enough to call each time (one extra GET).
+ */
+export async function getOrCreateDefaultBlog() {
+  const blogs = await getBlogs();
+  if (blogs.length > 0) return blogs[0];
+  return createBlog("Journal");
+}
+
+/**
+ * Create and publish a real blog article.
+ * @param {number} blogId
+ * @param {{ title: string, body_html: string, tags?: string, author?: string }} article
+ */
+export async function createArticle(blogId, { title, body_html, tags, author }) {
+  const data = await req(`/blogs/${blogId}/articles.json`, {
+    method: "POST",
+    body: JSON.stringify({
+      article: {
+        title,
+        body_html,
+        tags: tags || "",
+        author: author || "The Rival Is Me",
+        published: true,
+      },
+    }),
+  });
+  return data?.article;
 }

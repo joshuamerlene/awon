@@ -130,8 +130,27 @@ Return JSON:
   memory.cycleCount = cycleCount;
 
   // Notes have now been folded into the strategic decision (and will reach the
-  // product agent below too) — mark them consumed so they don't repeat forever.
-  for (const note of notes) markNoteConsumed(note.id);
+  // product agent below too). Give Josh a short reply on each one so the
+  // dashboard reads like an actual conversation, then mark them consumed.
+  for (const note of notes) {
+    try {
+      const response = await think({
+        system: PERSONAS.awon,
+        prompt: `Josh (your owner) left you this note: "${note.text}"
+
+Your strategic focus this cycle, decided with this note in mind: "${strategy.focus}"
+Your reasoning: "${strategy.reasoning}"
+
+Reply to Josh directly, in 1-3 sentences, plain text. Tell him what you're actually going to do about his note this cycle (or why it's not urgent yet). Sound like yourself — direct, no corporate filler.`,
+        fast: true,
+      });
+      markNoteConsumed(note.id, response.trim());
+      log("decision", `Replied to Josh's note "${note.text.slice(0, 60)}...": ${response.trim()}`);
+    } catch (err) {
+      log("error", `Failed to respond to note ${note.id}: ${err.message}`);
+      markNoteConsumed(note.id);
+    }
+  }
 
   // ── 4. Run sub-agents ──────────────────────────────────────────────────────
   let productRecs = null, contentPlan = null, analyticsInsights = null;

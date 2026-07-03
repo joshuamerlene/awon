@@ -7,6 +7,8 @@
  *   POST /api/blockers/:id/resolve — Josh resolves a blocker
  *   GET  /api/notes     — all notes Josh has left (proactive, not tied to a blocker)
  *   POST /api/notes     — Josh leaves Awon a free-text note for the next cycle
+ *   POST /api/budget/add-funds     — Josh tops up Awon's available budget
+ *   POST /api/budget/clear-payout  — Josh marks his owed payout as taken
  *   GET  /api/log       — recent action log
  *   GET  /api/memory    — Awon's sandbox/memory
  */
@@ -101,6 +103,29 @@ export function startDashboard() {
       if (!text || !text.trim()) return res.status(400).json({ error: "text is required" });
       const id = addNote(text);
       res.json({ success: true, id });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Budget ────────────────────────────────────────────────────────────────
+  app.post("/api/budget/add-funds", (req, res) => {
+    try {
+      const amount = Number(req.body?.amount);
+      if (!amount || amount <= 0) return res.status(400).json({ error: "amount must be a positive number" });
+      const ledger = new Ledger();
+      const summary = ledger.addFunds(amount, req.body?.note || "");
+      res.json({ success: true, budget: summary });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/budget/clear-payout", (req, res) => {
+    try {
+      const ledger = new Ledger();
+      const summary = ledger.clearPayout(req.body?.note || "");
+      res.json({ success: true, budget: summary });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

@@ -15,6 +15,9 @@
  *   text        — the raw note
  *   consumed    — false until Awon has read + acted on it in a cycle
  *   consumedAt  — timestamp of consumption
+ *   response    — Awon's own short reply, written when he consumes the note
+ *                 (null until then) — this is what makes it feel like an
+ *                 actual interface instead of a one-way mailbox
  * }
  */
 
@@ -48,6 +51,7 @@ export function addNote(text) {
     text: text.trim(),
     consumed: false,
     consumedAt: null,
+    response: null,
   };
   notes.push(note);
   save(notes);
@@ -59,13 +63,14 @@ export function getUnconsumedNotes() {
   return load().filter((n) => !n.consumed);
 }
 
-/** Mark a note as consumed after a cycle has acted on it. */
-export function markConsumed(id) {
+/** Mark a note as consumed after a cycle has acted on it, with Awon's reply. */
+export function markConsumed(id, response = null) {
   const notes = load();
   const note = notes.find((n) => n.id === id);
   if (note) {
     note.consumed = true;
     note.consumedAt = new Date().toISOString();
+    if (response) note.response = response;
     save(notes);
   }
 }

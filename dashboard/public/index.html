@@ -98,6 +98,17 @@
   .learning-item { font-size: 12px; color: var(--text); padding: 8px 12px; background: var(--bg); border-radius: 6px; margin-bottom: 6px; border-left: 2px solid var(--accent-dim); }
   .learning-time { font-size: 10px; color: var(--muted); display: block; margin-top: 2px; }
 
+  /* ── Budget actions ── */
+  .budget-actions { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+  .budget-action-row { display: flex; gap: 8px; align-items: center; }
+  .budget-action-row input[type="number"] { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 6px; font-size: 13px; outline: none; }
+  .budget-action-row input[type="number"]:focus { border-color: var(--accent); }
+  .budget-btn { background: var(--accent); color: #000; border: none; padding: 8px 14px; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 12px; white-space: nowrap; }
+  .budget-btn:hover { opacity: 0.85; }
+  .budget-btn.secondary { background: none; border: 1px solid var(--border); color: var(--text); }
+  .budget-btn.secondary:hover { border-color: var(--accent); color: var(--accent); }
+  .funded-note { font-size: 10px; color: var(--muted); }
+
   /* ── Notes ── */
   .notes-panel { grid-column: 1 / -1; }
   .note-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
@@ -113,6 +124,8 @@
   .note-item .note-status { font-weight: 700; letter-spacing: 0.05em; }
   .note-item.consumed .note-status { color: var(--online); }
   .note-item:not(.consumed) .note-status { color: #f59e0b; }
+  .note-response { margin-top: 10px; padding: 10px 12px; background: var(--surface); border-left: 2px solid var(--accent); border-radius: 0 6px 6px 0; font-size: 12px; color: var(--text); line-height: 1.5; }
+  .note-response .note-response-label { font-size: 9px; font-weight: 700; letter-spacing: 0.15em; color: var(--accent); text-transform: uppercase; display: block; margin-bottom: 4px; }
 
   /* ── Refresh ── */
   .refresh-btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; }
@@ -172,6 +185,16 @@
           <div class="value small" id="budget-payout">—</div>
         </div>
       </div>
+      <div class="budget-actions">
+        <div class="budget-action-row">
+          <input type="number" id="add-funds-input" placeholder="Amount, e.g. 10" min="0" step="0.01" />
+          <button class="budget-btn" onclick="addFunds()">Add Funds</button>
+        </div>
+        <div class="funded-note" id="funded-total"></div>
+        <div class="budget-action-row" id="clear-payout-row" style="display:none;">
+          <button class="budget-btn secondary" onclick="clearPayout()" style="width:100%;">Mark Payout Received →</button>
+        </div>
+      </div>
     </div>
 
     <div class="panel">
@@ -196,10 +219,10 @@
     <!-- Notes to Awon -->
     <div class="panel notes-panel">
       <div class="panel-header">
-        <span class="panel-title">Leave Awon A Note</span>
+        <span class="panel-title">Talk To Awon</span>
       </div>
       <div class="note-form">
-        <textarea class="note-input" id="note-input" placeholder="Tell Awon something proactively — context, an instruction, a correction. He'll read it at the start of his next cycle."></textarea>
+        <textarea class="note-input" id="note-input" placeholder="Point him in a direction, give him context, tell him to change course — he'll read it and reply at the start of his next cycle."></textarea>
         <div class="note-form-row">
           <span class="note-hint">Read on Awon's next cycle — not instant.</span>
           <button class="resolve-btn" onclick="submitNote()">Send to Awon →</button>
@@ -283,6 +306,8 @@ async function loadStatus() {
     document.getElementById("budget-adcap").textContent = `$${s.budget.adCapUsd}`;
     document.getElementById("budget-profit").textContent = `$${s.budget.cumulativeNetProfitUsd}`;
     document.getElementById("budget-payout").textContent = `$${s.budget.ownerPayoutOwedUsd}`;
+    document.getElementById("funded-total").textContent = `You've funded $${s.budget.cumulativeFundedUsd ?? 0} total`;
+    document.getElementById("clear-payout-row").style.display = s.budget.ownerPayoutOwedUsd > 0 ? "flex" : "none";
     document.getElementById("strategy-text").textContent = s.strategy || "Initializing...";
 
     const nextEl = document.getElementById("next-actions");
@@ -356,6 +381,33 @@ async function resolve(id) {
   } catch(e) { alert("Failed to resolve. Try again."); }
 }
 
+async function addFunds() {
+  const input = document.getElementById("add-funds-input");
+  const amount = parseFloat(input.value);
+  if (!amount || amount <= 0) { input.focus(); return; }
+  try {
+    const res = await fetch("/api/budget/add-funds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-dashboard-token": TOKEN },
+      body: JSON.stringify({ amount }),
+    });
+    if (!res.ok) throw new Error();
+    input.value = "";
+    loadStatus();
+  } catch(e) { alert("Failed to add funds. Try again."); }
+}
+
+async function clearPayout() {
+  if (!confirm("Confirm you've actually taken this payout out — this resets the owed amount to $0.")) return;
+  try {
+    await fetch("/api/budget/clear-payout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-dashboard-token": TOKEN },
+    });
+    loadStatus();
+  } catch(e) { alert("Failed to clear payout. Try again."); }
+}
+
 async function loadNotes() {
   try {
     const notes = await apiFetch("/api/notes");
@@ -371,6 +423,12 @@ async function loadNotes() {
           <span class="note-status">${n.consumed ? '✓ Read by Awon' : 'Waiting for next cycle'}</span>
           <span>${relativeTime(n.createdAt)}</span>
         </div>
+        ${n.response ? `
+          <div class="note-response">
+            <span class="note-response-label">Awon replied</span>
+            ${n.response}
+          </div>
+        ` : ""}
       </div>
     `).join("");
   } catch(e) {}
