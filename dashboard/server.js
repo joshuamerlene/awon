@@ -5,6 +5,8 @@
  *   GET  /api/status    — Awon's current state + budget summary
  *   GET  /api/blockers  — all blockers (pending + resolved)
  *   POST /api/blockers/:id/resolve — Josh resolves a blocker
+ *   GET  /api/notes     — all notes Josh has left (proactive, not tied to a blocker)
+ *   POST /api/notes     — Josh leaves Awon a free-text note for the next cycle
  *   GET  /api/log       — recent action log
  *   GET  /api/memory    — Awon's sandbox/memory
  */
@@ -13,6 +15,7 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { getAllBlockers, resolveBlocker, getPendingBlockers } from "../core/queue.js";
+import { addNote, getAllNotes } from "../core/notes.js";
 import { getLog } from "../core/logger.js";
 import { loadMemory } from "../core/memory.js";
 import { Ledger } from "../core/ledger.js";
@@ -76,6 +79,28 @@ export function startDashboard() {
       if (!resolution) return res.status(400).json({ error: "resolution is required" });
       const blocker = resolveBlocker(req.params.id, resolution);
       res.json({ success: true, blocker });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Notes ─────────────────────────────────────────────────────────────────
+  // Free-text notes Josh leaves proactively (not tied to a blocker Awon raised).
+  // Awon reads unconsumed notes at the start of his next cycle.
+  app.get("/api/notes", (req, res) => {
+    try {
+      res.json(getAllNotes());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/notes", (req, res) => {
+    try {
+      const { text } = req.body;
+      if (!text || !text.trim()) return res.status(400).json({ error: "text is required" });
+      const id = addNote(text);
+      res.json({ success: true, id });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

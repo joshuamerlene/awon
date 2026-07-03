@@ -98,6 +98,22 @@
   .learning-item { font-size: 12px; color: var(--text); padding: 8px 12px; background: var(--bg); border-radius: 6px; margin-bottom: 6px; border-left: 2px solid var(--accent-dim); }
   .learning-time { font-size: 10px; color: var(--muted); display: block; margin-top: 2px; }
 
+  /* ── Notes ── */
+  .notes-panel { grid-column: 1 / -1; }
+  .note-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+  .note-input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: 6px; font-size: 13px; resize: vertical; min-height: 70px; outline: none; font-family: inherit; }
+  .note-input:focus { border-color: var(--accent); }
+  .note-form-row { display: flex; align-items: center; gap: 12px; }
+  .note-hint { font-size: 11px; color: var(--muted); flex: 1; }
+  .note-list { display: flex; flex-direction: column; gap: 8px; }
+  .note-item { background: var(--bg); border: 1px solid var(--border); border-left: 3px solid var(--muted); border-radius: 6px; padding: 12px 14px; }
+  .note-item.consumed { border-left-color: var(--online); }
+  .note-item .note-text { font-size: 13px; color: var(--text); line-height: 1.5; margin-bottom: 6px; }
+  .note-item .note-meta { font-size: 10px; color: var(--muted); display: flex; justify-content: space-between; }
+  .note-item .note-status { font-weight: 700; letter-spacing: 0.05em; }
+  .note-item.consumed .note-status { color: var(--online); }
+  .note-item:not(.consumed) .note-status { color: #f59e0b; }
+
   /* ── Refresh ── */
   .refresh-btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; }
   .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
@@ -174,6 +190,23 @@
       </div>
       <div id="blockers-container">
         <div class="no-blockers"><span>✓</span>No blockers. Awon is running free.</div>
+      </div>
+    </div>
+
+    <!-- Notes to Awon -->
+    <div class="panel notes-panel">
+      <div class="panel-header">
+        <span class="panel-title">Leave Awon A Note</span>
+      </div>
+      <div class="note-form">
+        <textarea class="note-input" id="note-input" placeholder="Tell Awon something proactively — context, an instruction, a correction. He'll read it at the start of his next cycle."></textarea>
+        <div class="note-form-row">
+          <span class="note-hint">Read on Awon's next cycle — not instant.</span>
+          <button class="resolve-btn" onclick="submitNote()">Send to Awon →</button>
+        </div>
+      </div>
+      <div class="note-list" id="notes-container">
+        <div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No notes yet.</div>
       </div>
     </div>
 
@@ -323,6 +356,41 @@ async function resolve(id) {
   } catch(e) { alert("Failed to resolve. Try again."); }
 }
 
+async function loadNotes() {
+  try {
+    const notes = await apiFetch("/api/notes");
+    const container = document.getElementById("notes-container");
+    if (notes.length === 0) {
+      container.innerHTML = `<div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No notes yet.</div>`;
+      return;
+    }
+    container.innerHTML = notes.map(n => `
+      <div class="note-item ${n.consumed ? 'consumed' : ''}">
+        <div class="note-text">${n.text}</div>
+        <div class="note-meta">
+          <span class="note-status">${n.consumed ? '✓ Read by Awon' : 'Waiting for next cycle'}</span>
+          <span>${relativeTime(n.createdAt)}</span>
+        </div>
+      </div>
+    `).join("");
+  } catch(e) {}
+}
+
+async function submitNote() {
+  const input = document.getElementById("note-input");
+  const text = input.value.trim();
+  if (!text) { input.focus(); return; }
+  try {
+    await fetch("/api/notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-dashboard-token": TOKEN },
+      body: JSON.stringify({ text }),
+    });
+    input.value = "";
+    loadNotes();
+  } catch(e) { alert("Failed to send note. Try again."); }
+}
+
 async function loadLog() {
   try {
     const entries = await apiFetch("/api/log?limit=50");
@@ -372,7 +440,7 @@ async function loadSandbox() {
 
 async function loadAll() {
   await loadStatus();
-  await Promise.all([loadBlockers(), loadLog(), loadSandbox()]);
+  await Promise.all([loadBlockers(), loadNotes(), loadLog(), loadSandbox()]);
 }
 
 // Try auto-login with stored token

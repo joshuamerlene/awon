@@ -7,6 +7,11 @@
  *   3. Researches new POD fitness products via Printful
  *   4. Creates and publishes new Printful products autonomously
  *   5. Flags the original non-POD products (bag + journal) for replacement
+ *   6. Reads any notes Josh left (see core/notes.js) — e.g. flagging that a
+ *      product is actually just a low-margin Amazon affiliate link — and, when
+ *      a note points at one, sources an owned-margin CJ dropship replacement
+ *      and swaps it in (candidate.replacesProductId gets archived once the
+ *      replacement is confirmed live)
  *
  * Sub-agents return recommendations AND execute them.
  */
@@ -23,7 +28,7 @@ const LEGACY_PRODUCTS_TO_REPLACE = [
   "THE JOURNAL OF DISCIPLINE",
 ];
 
-export async function runProductAgent({ products, orders, memory, ledger }) {
+export async function runProductAgent({ products, orders, memory, ledger, notes = [] }) {
   log("sub-agent", "Product agent starting...");
 
   // ── 1. Identify legacy products that need to be replaced ─────────────────
@@ -63,6 +68,9 @@ Brand memory / current strategy:
 ${memory.strategy || "No strategy set yet"}
 ${(memory.learnings || []).slice(0, 5).map(l => `- ${l.insight}`).join("\n")}
 
+Notes Josh left for you (proactive instructions/context — read carefully, these can point out things the catalog data alone won't tell you, like a product that LOOKS like a normal Shopify listing but is actually just an outbound Amazon affiliate link earning near-zero margin):
+${notes.length > 0 ? notes.map(n => `- "${n.text}"`).join("\n") : "None."}
+
 Printful available: ${printful.isConfigured() ? "YES — can create POD products autonomously (Printful is already connected to Shopify)" : "NO — PRINTFUL_API_KEY not set"}
 CJ Dropshipping available: ${cj.isConfigured() ? "YES — can search CJ catalog and list supplements/gear on Shopify automatically" : "NO — CJ_API_KEY not set"}
 Available budget: $${ledger.getAvailable().toFixed(2)}
@@ -94,12 +102,13 @@ Return JSON:
       "estimatedCOGS": 0.00,
       "whyItFits": "...",
       "tiktokViralityScore": "low|medium|high",
-      "urgency": "add now|add soon|test first"
+      "urgency": "add now|add soon|test first",
+      "replacesProductId": "the existing catalog productId this replaces, e.g. a low-margin Amazon affiliate placeholder — null if this is a brand new addition"
     }
   ]
 }
 
-Be decisive. If the catalog needs cleanup, call it. If Printful is available, recommend 2-3 specific POD fitness products to add NOW. Use printfulSearchKeyword values like: "t-shirt", "hoodie", "shorts", "joggers", "tank", "hat", "sweatshirt".`,
+Be decisive. If the catalog needs cleanup, call it. If Printful is available, recommend 2-3 specific POD fitness products to add NOW. Use printfulSearchKeyword values like: "t-shirt", "hoodie", "shorts", "joggers", "tank", "hat", "sweatshirt". If a note or the catalog itself points to Amazon-affiliate-link products (near-zero margin, not real inventory), treat replacing them with an owned-margin CJ dropship equivalent as high urgency — set "urgency": "add now" and fill in "replacesProductId" with that product's id so it gets swapped out, not just added alongside.`,
   });
 
   log("sub-agent", `Analysis done. ${result.newPODProducts?.length || 0} POD candidates, ${result.kill?.length || 0} to kill, ${result.legacyToArchive?.length || 0} legacy to archive.`);
@@ -235,9 +244,22 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
           cjSku: best.sku,
           cogs: parseFloat(best.sellPrice),
           retailPrice: parseFloat(created.variants?.[0]?.price),
+          replacedProductId: candidate.replacesProductId || null,
         });
 
         log("action", `CJ product live on Shopify: "${created.title}" — $${created.variants?.[0]?.price} retail, $${best.sellPrice} COGS`);
+
+        // If this was replacing an existing low-margin listing (e.g. an Amazon
+        // affiliate link placeholder), archive the old one now that its
+        // owned-margin replacement is confirmed live.
+        if (candidate.replacesProductId) {
+          try {
+            await shopify.archiveProduct(candidate.replacesProductId);
+            log("action", `Archived old listing ${candidate.replacesProductId} — replaced by CJ dropship product "${created.title}"`);
+          } catch (archiveErr) {
+            log("error", `Created replacement product but failed to archive old listing ${candidate.replacesProductId}: ${archiveErr.message}`);
+          }
+        }
 
       } catch (err) {
         log("error", `CJ product listing failed for "${candidate.description}": ${err.message}`);

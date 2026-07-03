@@ -17,6 +17,7 @@ import { thinkJSON, think, PERSONAS } from "./claude.js";
 import { Ledger } from "./ledger.js";
 import { loadMemory, saveMemory, addLearning } from "./memory.js";
 import { getPendingBlockers, getResolvedBlockers, markProcessed, addBlocker } from "./queue.js";
+import { getUnconsumedNotes, markConsumed as markNoteConsumed } from "./notes.js";
 import { log } from "./logger.js";
 import { runProductAgent } from "../agents/product.js";
 import { runContentAgent } from "../agents/content.js";
@@ -36,8 +37,12 @@ export async function runCycle() {
   const memory = loadMemory();
   const pendingBlockers = getPendingBlockers();
   const resolvedBlockers = getResolvedBlockers();
+  const notes = getUnconsumedNotes();
 
-  log("system", `Budget: $${ledger.getAvailable().toFixed(2)} | Cycle #${(memory.cycleCount || 0) + 1} | Pending blockers: ${pendingBlockers.length}`);
+  log("system", `Budget: $${ledger.getAvailable().toFixed(2)} | Cycle #${(memory.cycleCount || 0) + 1} | Pending blockers: ${pendingBlockers.length} | New notes from Josh: ${notes.length}`);
+  if (notes.length > 0) {
+    log("decision", `Reading ${notes.length} note(s) Josh left: ${notes.map(n => `"${n.text}"`).join(" | ")}`);
+  }
 
   // ── 1. Process resolved blockers ──────────────────────────────────────────
   for (const blocker of resolvedBlockers) {
@@ -102,6 +107,9 @@ Current data:
 - Pending blockers (don't act on these, just know they exist): ${pendingBlockers.map(b => b.title).join(", ") || "none"}
 - Store design agent running this cycle: ${runStoreAgentThisCycle}
 
+Notes Josh left for you since your last cycle (he can leave these anytime from the dashboard — they're proactive instructions or context, not something you asked for. Take them seriously and let them override your default focus if they're time-sensitive):
+${notes.length > 0 ? notes.map(n => `- "${n.text}" (left ${n.createdAt})`).join("\n") : "None."}
+
 Return JSON:
 {
   "focus": "one sentence — what is the most important thing this cycle?",
@@ -121,12 +129,16 @@ Return JSON:
   memory.strategy = strategy.focus;
   memory.cycleCount = cycleCount;
 
+  // Notes have now been folded into the strategic decision (and will reach the
+  // product agent below too) — mark them consumed so they don't repeat forever.
+  for (const note of notes) markNoteConsumed(note.id);
+
   // ── 4. Run sub-agents ──────────────────────────────────────────────────────
   let productRecs = null, contentPlan = null, analyticsInsights = null;
 
   if (strategy.runProductAgent) {
     try {
-      productRecs = await runProductAgent({ products, orders, memory, ledger });
+      productRecs = await runProductAgent({ products, orders, memory, ledger, notes });
       log("sub-agent", "Product agent completed", { recommendations: productRecs?.summary });
     } catch (err) {
       log("error", `Product agent failed: ${err.message}`);
