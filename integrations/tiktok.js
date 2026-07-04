@@ -87,6 +87,18 @@ export async function publishVideo({ videoPath, videoUrl, caption, hashtags = []
 
   const fullCaption = [caption, ...hashtags.map((h) => `#${h.replace(/^#/, "")}`)].join(" ");
 
+  // IMPORTANT — privacy_level:
+  // This app's production audit was rejected (see AWON_HANDOFF / memory —
+  // TikTok flagged it as "personal or company internal use," which the
+  // Content Posting API's public review process doesn't approve for a
+  // single-brand self-posting tool). Unaudited API clients are still allowed
+  // to post via Direct Post, but ONLY privately (SELF_ONLY) — the account
+  // owner then has to manually flip each video to public in the TikTok app.
+  // Do NOT change this to PUBLIC_TO_EVERYONE unless the app has actually
+  // passed TikTok's audit — it will be rejected/fail otherwise.
+  // Override only if TIKTOK_AUDITED=true is explicitly set once that changes.
+  const privacyLevel = process.env.TIKTOK_AUDITED === "true" ? "PUBLIC_TO_EVERYONE" : "SELF_ONLY";
+
   // Step 1: Initialize the upload
   const initRes = await fetch(`${CONTENT_BASE}/post/publish/video/init/`, {
     method: "POST",
@@ -94,7 +106,7 @@ export async function publishVideo({ videoPath, videoUrl, caption, hashtags = []
     body: JSON.stringify({
       post_info: {
         title: fullCaption,
-        privacy_level: "PUBLIC_TO_EVERYONE",
+        privacy_level: privacyLevel,
         disable_duet: false,
         disable_comment: false,
         disable_stitch: false,
@@ -126,7 +138,7 @@ export async function publishVideo({ videoPath, videoUrl, caption, hashtags = []
     if (!uploadRes.ok) throw new Error(`TikTok video upload error ${uploadRes.status}`);
   }
 
-  return publishId;
+  return { publishId, privacyLevel };
 }
 
 /**

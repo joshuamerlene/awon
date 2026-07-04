@@ -11,11 +11,16 @@
  *   POST /api/budget/clear-payout  — Josh marks his owed payout as taken
  *   GET  /api/log       — recent action log
  *   GET  /api/memory    — Awon's sandbox/memory
+ *   GET  /auth/tiktok            — kicks off TikTok OAuth (Login Kit v2)
+ *   GET  /auth/tiktok/callback   — exchanges code for TIKTOK_CONTENT_ACCESS_TOKEN
+ *   GET  /api/footage            — list raw footage Josh has uploaded
+ *   POST /api/footage/upload     — Josh uploads raw video files for Awon to edit
  */
 
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
+import multer from "multer";
 import { getAllBlockers, resolveBlocker, getPendingBlockers } from "../core/queue.js";
 import { addNote, getAllNotes } from "../core/notes.js";
 import { getLog } from "../core/logger.js";
@@ -23,6 +28,7 @@ import { loadMemory } from "../core/memory.js";
 import { Ledger } from "../core/ledger.js";
 import { getContentQueue } from "../agents/content.js";
 import * as shopify from "../integrations/shopify.js";
+import * as video from "../integrations/video.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -59,6 +65,7 @@ export function startDashboard() {
         nextActions: memory.nextActions,
         budget: ledger.getSummary(),
         pendingBlockers: pending.length,
+        tiktokConnected: !!process.env.TIKTOK_CONTENT_ACCESS_TOKEN,
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
@@ -150,6 +157,35 @@ export function startDashboard() {
     }
   });
 
+  // ── Raw footage upload (for Awon to edit/remix into TikTok content) ────────
+  const footageUpload = multer({
+    storage: multer.diskStorage({
+      destination: (req, file, cb) => cb(null, video.rawFootageDir()),
+      filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_")}`),
+    }),
+    limits: { fileSize: 500 * 1024 * 1024 }, // 500MB per file
+    fileFilter: (req, file, cb) => {
+      if (/\.(mp4|mov|m4v)$/i.test(file.originalname)) cb(null, true);
+      else cb(new Error("Only .mp4, .mov, .m4v files are accepted."));
+    },
+  });
+
+  app.get("/api/footage", (req, res) => {
+    try {
+      res.json(video.listRawFootage());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/footage/upload", footageUpload.array("files", 10), (req, res) => {
+    try {
+      res.json({ success: true, uploaded: (req.files || []).map((f) => f.filename) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Content Queue ─────────────────────────────────────────────────────────
   app.get("/api/content-queue", (req, res) => {
     try {
@@ -170,6 +206,66 @@ export function startDashboard() {
       res.json({ success: true, count: archived.length, products: archived });
     } catch (err) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── TikTok OAuth (Login Kit v2 / Content Posting API) ───────────────────────
+  // Kicks off the real OAuth consent flow to get TIKTOK_CONTENT_ACCESS_TOKEN for
+  // @the.rival.is.me. Required even for unaudited posting — audit status only
+  // controls whether posts land public or SELF_ONLY, not whether OAuth works.
+  app.get("/auth/tiktok", (req, res) => {
+    const clientKey = process.env.TIKTOK_APP_KEY;
+    if (!clientKey) return res.status(500).send("TIKTOK_APP_KEY not set in Railway env vars.");
+
+    const redirectUri = `https://${req.get("host")}/auth/tiktok/callback`;
+    const scopes = ["user.info.basic", "user.info.profile", "user.info.stats", "video.list", "video.publish", "video.upload"].join(",");
+    const state = Math.random().toString(36).slice(2);
+
+    const authUrl = `https://www.tiktok.com/v2/auth/authorize/?client_key=${encodeURIComponent(clientKey)}&scope=${encodeURIComponent(scopes)}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
+    res.redirect(authUrl);
+  });
+
+  app.get("/auth/tiktok/callback", async (req, res) => {
+    const { code, error, error_description } = req.query;
+    if (error) return res.status(400).send(`<h1>TikTok OAuth Error</h1><p>${error}: ${error_description || ""}</p>`);
+    if (!code) return res.status(400).send("Missing code parameter.");
+
+    try {
+      const clientKey = process.env.TIKTOK_APP_KEY;
+      const clientSecret = process.env.TIKTOK_APP_SECRET;
+      if (!clientKey || !clientSecret) {
+        return res.send(`<h1>OAuth Code Received</h1><p><b>Code:</b> <code>${code}</code></p><p>Set TIKTOK_APP_KEY + TIKTOK_APP_SECRET in Railway env vars, then hit /auth/tiktok again.</p>`);
+      }
+
+      const redirectUri = `https://${req.get("host")}/auth/tiktok/callback`;
+      const tokenRes = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", "Cache-Control": "no-cache" },
+        body: new URLSearchParams({
+          client_key: clientKey,
+          client_secret: clientSecret,
+          code: String(code),
+          grant_type: "authorization_code",
+          redirect_uri: redirectUri,
+        }),
+      });
+
+      const tokenData = await tokenRes.json();
+
+      if (tokenData.access_token) {
+        res.send(
+          `<h1>✅ TikTok Connected!</h1>` +
+          `<p><b>Access Token:</b> <code style="word-break:break-all">${tokenData.access_token}</code></p>` +
+          `<p><b>Refresh Token:</b> <code style="word-break:break-all">${tokenData.refresh_token}</code></p>` +
+          `<p><b>Expires in:</b> ${tokenData.expires_in}s &nbsp; <b>Scope:</b> ${tokenData.scope}</p>` +
+          `<p>Add <code>TIKTOK_CONTENT_ACCESS_TOKEN=${tokenData.access_token}</code> (and ideally <code>TIKTOK_CONTENT_REFRESH_TOKEN=${tokenData.refresh_token}</code>) to Railway environment variables.</p>` +
+          `<p style="color:#b45309">Note: this app is unaudited, so videos Awon posts will land as private (Only You) until you manually flip each one to public in the TikTok app. Check the dashboard's "Needs Your Input" section after each post.</p>`
+        );
+      } else {
+        res.send(`<h1>Token Exchange Error</h1><pre>${JSON.stringify(tokenData, null, 2)}</pre>`);
+      }
+    } catch (err) {
+      res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
     }
   });
 

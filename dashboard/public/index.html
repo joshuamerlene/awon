@@ -127,6 +127,15 @@
   .note-response { margin-top: 10px; padding: 10px 12px; background: var(--surface); border-left: 2px solid var(--accent); border-radius: 0 6px 6px 0; font-size: 12px; color: var(--text); line-height: 1.5; }
   .note-response .note-response-label { font-size: 9px; font-weight: 700; letter-spacing: 0.15em; color: var(--accent); text-transform: uppercase; display: block; margin-bottom: 4px; }
 
+  /* ── Footage ── */
+  .footage-panel { grid-column: 1 / -1; }
+  .footage-drop { border: 1px dashed var(--border); border-radius: 8px; padding: 20px; text-align: center; margin-bottom: 16px; }
+  .footage-drop input[type="file"] { color: var(--muted); font-size: 12px; }
+  .footage-list { display: flex; flex-direction: column; gap: 6px; }
+  .footage-item { display: flex; justify-content: space-between; align-items: center; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; font-size: 12px; }
+  .footage-item .footage-name { color: var(--text); }
+  .footage-item .footage-meta { color: var(--muted); font-size: 10px; }
+
   /* ── Refresh ── */
   .refresh-btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; }
   .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
@@ -153,6 +162,7 @@
       <span id="status-text">Connecting...</span>
     </div>
     <span class="last-cycle" id="last-cycle"></span>
+    <a class="refresh-btn" id="tiktok-connect-link" href="/auth/tiktok" style="display:none;text-decoration:none;">Connect TikTok →</a>
     <button class="refresh-btn" onclick="loadAll()">↻ Refresh</button>
   </div>
 </header>
@@ -233,6 +243,21 @@
       </div>
     </div>
 
+    <!-- Raw Footage -->
+    <div class="panel footage-panel">
+      <div class="panel-header">
+        <span class="panel-title">Raw Footage For Awon To Edit</span>
+      </div>
+      <div class="footage-drop">
+        <input type="file" id="footage-input" accept=".mp4,.mov,.m4v" multiple />
+        <button class="resolve-btn" onclick="uploadFootage()" style="margin-left:12px;">Upload</button>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px;">mp4, mov, or m4v — up to 500MB each. Awon can trim, join, caption, and reframe these for TikTok.</div>
+      </div>
+      <div class="footage-list" id="footage-container">
+        <div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No footage uploaded yet.</div>
+      </div>
+    </div>
+
     <!-- Activity Log -->
     <div class="panel">
       <div class="panel-header">
@@ -309,6 +334,7 @@ async function loadStatus() {
     document.getElementById("funded-total").textContent = `You've funded $${s.budget.cumulativeFundedUsd ?? 0} total`;
     document.getElementById("clear-payout-row").style.display = s.budget.ownerPayoutOwedUsd > 0 ? "flex" : "none";
     document.getElementById("strategy-text").textContent = s.strategy || "Initializing...";
+    document.getElementById("tiktok-connect-link").style.display = s.tiktokConnected ? "none" : "inline-block";
 
     const nextEl = document.getElementById("next-actions");
     nextEl.innerHTML = (s.nextActions || []).map(a => `<div class="next-action">→ ${a}</div>`).join("");
@@ -408,6 +434,46 @@ async function clearPayout() {
   } catch(e) { alert("Failed to clear payout. Try again."); }
 }
 
+function formatBytes(bytes) {
+  if (!bytes) return "0 B";
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1 ? `${mb.toFixed(1)} MB` : `${(bytes / 1024).toFixed(0)} KB`;
+}
+
+async function loadFootage() {
+  try {
+    const files = await apiFetch("/api/footage");
+    const container = document.getElementById("footage-container");
+    if (files.length === 0) {
+      container.innerHTML = `<div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No footage uploaded yet.</div>`;
+      return;
+    }
+    container.innerHTML = files.map(f => `
+      <div class="footage-item">
+        <span class="footage-name">${f.filename}</span>
+        <span class="footage-meta">${formatBytes(f.sizeBytes)} · ${relativeTime(f.uploadedAt)}</span>
+      </div>
+    `).join("");
+  } catch(e) {}
+}
+
+async function uploadFootage() {
+  const input = document.getElementById("footage-input");
+  if (!input.files.length) { input.focus(); return; }
+  const formData = new FormData();
+  for (const file of input.files) formData.append("files", file);
+  try {
+    const res = await fetch("/api/footage/upload", {
+      method: "POST",
+      headers: { "x-dashboard-token": TOKEN },
+      body: formData,
+    });
+    if (!res.ok) throw new Error();
+    input.value = "";
+    loadFootage();
+  } catch(e) { alert("Upload failed. Try again — files must be mp4/mov/m4v under 500MB."); }
+}
+
 async function loadNotes() {
   try {
     const notes = await apiFetch("/api/notes");
@@ -498,7 +564,7 @@ async function loadSandbox() {
 
 async function loadAll() {
   await loadStatus();
-  await Promise.all([loadBlockers(), loadNotes(), loadLog(), loadSandbox()]);
+  await Promise.all([loadBlockers(), loadNotes(), loadLog(), loadSandbox(), loadFootage()]);
 }
 
 // Try auto-login with stored token

@@ -251,8 +251,18 @@ Reply to Josh directly, in 1-3 sentences, plain text. Tell him what you're actua
   if (contentPlan) {
     for (const post of contentPlan.postsToPublish || []) {
       try {
-        const videoId = await tiktok.publishVideo(post);
-        log("action", `Published TikTok: "${post.caption?.slice(0, 60)}..." (${videoId})`);
+        const { publishId, privacyLevel } = await tiktok.publishVideo(post);
+        if (privacyLevel === "SELF_ONLY") {
+          log("action", `Posted to TikTok privately (unaudited app — awaiting manual publish): "${post.caption?.slice(0, 60)}..." (${publishId})`);
+          addBlocker({
+            title: "TikTok video posted privately — needs manual publish",
+            context: `Posted "${post.caption?.slice(0, 80)}..." to @the.rival.is.me, but the app is unaudited so TikTok forces it private (SELF_ONLY). Open the TikTok app, find this draft, and change its privacy to "Everyone" to make it public. Publish ID: ${publishId}`,
+            options: ["I've made it public", "Skip this one"],
+            thread: "Once you confirm, I'll move on — I can't flip the privacy setting myself, TikTok only allows that from within the app.",
+          });
+        } else {
+          log("action", `Published TikTok: "${post.caption?.slice(0, 60)}..." (${publishId})`);
+        }
       } catch (err) {
         log("error", `TikTok publish failed: ${err.message}`);
       }
