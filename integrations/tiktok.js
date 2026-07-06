@@ -10,6 +10,13 @@
  * Status: Shell implemented. Needs credentials from TikTok Partner Center.
  * The integration degrades gracefully — Awon skips TikTok actions and logs
  * them as pending until credentials are active.
+ *
+ * Token lifecycle: the Content Posting API access token from OAuth expires
+ * in ~24h. Rather than needing Josh to redo the OAuth consent flow daily,
+ * this module persists the live access/refresh token pair in
+ * data/tiktok_token.json (on the Volume, survives deploys) and silently
+ * refreshes it before it expires. TIKTOK_CONTENT_ACCESS_TOKEN /
+ * TIKTOK_CONTENT_REFRESH_TOKEN env vars only ever seed it the first time.
  */
 
 import fs from "fs";
@@ -17,18 +24,91 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const TOKEN_PATH = path.join(__dirname, "..", "data", "tiktok_token.json");
 
 const SHOP_TOKEN  = process.env.TIKTOK_SHOP_ACCESS_TOKEN;
 const SHOP_ID     = process.env.TIKTOK_SHOP_ID;
 const APP_KEY     = process.env.TIKTOK_APP_KEY;
 const APP_SECRET  = process.env.TIKTOK_APP_SECRET;
-const CONTENT_TOKEN = process.env.TIKTOK_CONTENT_ACCESS_TOKEN; // from Content Posting API OAuth
 
 const SHOP_BASE    = "https://open-api.tiktokglobalshop.com";
 const CONTENT_BASE = "https://open.tiktokapis.com/v2";
 
 function shopReady() { return !!(SHOP_TOKEN && SHOP_ID && APP_KEY); }
-function contentReady() { return !!CONTENT_TOKEN; }
+
+// ─── Token persistence + auto-refresh ────────────────────────────────────────
+
+function loadTokenState() {
+  if (fs.existsSync(TOKEN_PATH)) {
+    return JSON.parse(fs.readFileSync(TOKEN_PATH, "utf-8"));
+  }
+  // First run — seed from env vars (set once via the /auth/tiktok OAuth flow).
+  const envAccess = process.env.TIKTOK_CONTENT_ACCESS_TOKEN;
+  const envRefresh = process.env.TIKTOK_CONTENT_REFRESH_TOKEN;
+  if (!envAccess) return null;
+  const state = {
+    accessToken: envAccess,
+    refreshToken: envRefresh || null,
+    // Conservative: treat env-seeded tokens as issued now, expiring in 23h
+    // (TikTok's actual window is 24h — this just forces an early refresh).
+    expiresAt: Date.now() + 23 * 3600 * 1000,
+  };
+  saveTokenState(state);
+  return state;
+}
+
+function saveTokenState(state) {
+  fs.mkdirSync(path.dirname(TOKEN_PATH), { recursive: true });
+  fs.writeFileSync(TOKEN_PATH, JSON.stringify(state, null, 2));
+}
+
+/**
+ * Refresh the access token using the stored refresh token.
+ * TikTok issues a NEW refresh token on every refresh — must be saved too.
+ */
+async function refreshAccessToken(state) {
+  if (!state.refreshToken) throw new Error("No TikTok refresh token available — reconnect via /auth/tiktok.");
+  if (!APP_KEY || !APP_SECRET) throw new Error("TIKTOK_APP_KEY/TIKTOK_APP_SECRET not set — needed to refresh.");
+
+  const res = await fetch(`${CONTENT_BASE}/oauth/token/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "Cache-Control": "no-cache" },
+    body: new URLSearchParams({
+      client_key: APP_KEY,
+      client_secret: APP_SECRET,
+      grant_type: "refresh_token",
+      refresh_token: state.refreshToken,
+    }),
+  });
+
+  const data = await res.json();
+  if (!data.access_token) throw new Error(`TikTok token refresh failed: ${JSON.stringify(data)}`);
+
+  const newState = {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token || state.refreshToken,
+    expiresAt: Date.now() + (Number(data.expires_in || 86400) - 3600) * 1000, // refresh 1h early
+  };
+  saveTokenState(newState);
+  return newState;
+}
+
+/**
+ * Get a valid access token, refreshing first if it's expired or close to it.
+ * Every API call below should go through this instead of reading a static token.
+ */
+async function getAccessToken() {
+  let state = loadTokenState();
+  if (!state) return null;
+  if (Date.now() >= state.expiresAt) {
+    state = await refreshAccessToken(state);
+  }
+  return state.accessToken;
+}
+
+function contentReady() {
+  return !!(process.env.TIKTOK_CONTENT_ACCESS_TOKEN || fs.existsSync(TOKEN_PATH));
+}
 
 // ─── TikTok Shop API ──────────────────────────────────────────────────────────
 
@@ -60,11 +140,12 @@ export async function syncProductToShop(shopifyProduct) {
  * Uses Content Posting API video.list scope.
  */
 export async function getAccountVideos() {
-  if (!contentReady()) throw new Error("TIKTOK_CONTENT_ACCESS_TOKEN not set.");
+  const token = await getAccessToken();
+  if (!token) throw new Error("TikTok not connected — visit /auth/tiktok to connect.");
 
   const res = await fetch(`${CONTENT_BASE}/video/list/?fields=id,title,video_description,duration,create_time,statistics`, {
     headers: {
-      Authorization: `Bearer ${CONTENT_TOKEN}`,
+      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
     method: "POST",
@@ -83,17 +164,18 @@ export async function getAccountVideos() {
  *   - videoUrl: pull from URL (for existing CDN-hosted clips)
  */
 export async function publishVideo({ videoPath, videoUrl, caption, hashtags = [], productId = null }) {
-  if (!contentReady()) throw new Error("TIKTOK_CONTENT_ACCESS_TOKEN not set.");
+  const token = await getAccessToken();
+  if (!token) throw new Error("TikTok not connected — visit /auth/tiktok to connect.");
 
   const fullCaption = [caption, ...hashtags.map((h) => `#${h.replace(/^#/, "")}`)].join(" ");
 
   // IMPORTANT — privacy_level:
-  // This app's production audit was rejected (see AWON_HANDOFF / memory —
-  // TikTok flagged it as "personal or company internal use," which the
-  // Content Posting API's public review process doesn't approve for a
-  // single-brand self-posting tool). Unaudited API clients are still allowed
-  // to post via Direct Post, but ONLY privately (SELF_ONLY) — the account
-  // owner then has to manually flip each video to public in the TikTok app.
+  // This app's production audit was rejected — TikTok flagged it as
+  // "personal or company internal use," which the Content Posting API's
+  // public review process doesn't approve for a single-brand self-posting
+  // tool. Unaudited API clients (this Sandbox app) are still allowed to post
+  // via Direct Post, but ONLY privately (SELF_ONLY) — the account owner then
+  // has to manually flip each video to public in the TikTok app.
   // Do NOT change this to PUBLIC_TO_EVERYONE unless the app has actually
   // passed TikTok's audit — it will be rejected/fail otherwise.
   // Override only if TIKTOK_AUDITED=true is explicitly set once that changes.
@@ -102,7 +184,7 @@ export async function publishVideo({ videoPath, videoUrl, caption, hashtags = []
   // Step 1: Initialize the upload
   const initRes = await fetch(`${CONTENT_BASE}/post/publish/video/init/`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${CONTENT_TOKEN}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       post_info: {
         title: fullCaption,
@@ -155,10 +237,11 @@ export async function tagProductOnVideo(videoId, productId) {
  * Get performance data for a video.
  */
 export async function getVideoPerformance(videoId) {
-  if (!contentReady()) throw new Error("TIKTOK_CONTENT_ACCESS_TOKEN not set.");
+  const token = await getAccessToken();
+  if (!token) throw new Error("TikTok not connected — visit /auth/tiktok to connect.");
   const res = await fetch(`${CONTENT_BASE}/video/query/?fields=id,statistics`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${CONTENT_TOKEN}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ filters: { video_ids: [videoId] } }),
   });
   if (!res.ok) throw new Error(`TikTok video query error ${res.status}`);
@@ -191,3 +274,5 @@ export async function getShopOrders() {
   if (!shopReady()) throw new Error("TikTok Shop credentials not set.");
   throw new Error("TikTok Shop orders: request signing not yet implemented.");
 }
+
+export { contentReady };
