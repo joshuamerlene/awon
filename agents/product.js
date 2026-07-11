@@ -18,6 +18,7 @@
 
 import { thinkJSON, PERSONAS } from "../core/claude.js";
 import { log } from "../core/logger.js";
+import { addBlockerOnce } from "../core/queue.js";
 import * as shopify from "../integrations/shopify.js";
 import * as printful from "../integrations/printful.js";
 import * as cj from "../integrations/cj.js";
@@ -113,17 +114,14 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
 
   log("sub-agent", `Analysis done. ${result.newPODProducts?.length || 0} POD candidates, ${result.kill?.length || 0} to kill, ${result.legacyToArchive?.length || 0} legacy to archive.`);
 
-  // ── 3. Archive legacy products ────────────────────────────────────────────
+  // Legacy products flagged for replacement are NOT archived here anymore.
+  // They used to be archived at this point in the function — before Printful/
+  // CJ had even been asked to create a replacement — so a bad Printful token
+  // or dead CJ integration meant real merch got pulled down with nothing
+  // live to replace it. Archiving now happens in step 8, after we know
+  // whether a replacement actually went live this cycle. Declared here (empty)
+  // so the dedup check just below has something to read; step 8 fills it in.
   const legacyArchived = [];
-  for (const productId of result.legacyToArchive || []) {
-    try {
-      await shopify.archiveProduct(productId);
-      legacyArchived.push(productId);
-      log("action", `Archived legacy product ${productId} — replaced by POD`);
-    } catch (err) {
-      log("error", `Failed to archive legacy product ${productId}: ${err.message}`);
-    }
-  }
 
   // ── 4. Archive underperformers ────────────────────────────────────────────
   for (const productId of result.kill || []) {
@@ -190,6 +188,14 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
 
       } catch (err) {
         log("error", `Printful product creation failed for "${candidate.printfulSearchKeyword}": ${err.message}`);
+        if (/401|invalid|unauthorized/i.test(err.message)) {
+          addBlockerOnce({
+            title: "Printful API key is invalid — no POD products can go live",
+            context: `Printful is rejecting every request with a 401/Unauthorized error: "${err.message}". This means no new POD products can be created or synced to Shopify. Go to printful.com/dashboard/settings/api, regenerate the key, and update PRINTFUL_API_KEY in Railway's env vars.`,
+            options: ["I've updated the Printful API key in Railway", "Skip Printful for now"],
+            thread: "Once the key works again, I'll resume creating and publishing POD products.",
+          });
+        }
       }
     }
   } else {
@@ -263,7 +269,43 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
 
       } catch (err) {
         log("error", `CJ product listing failed for "${candidate.description}": ${err.message}`);
+        addBlockerOnce({
+          title: "CJ Dropshipping isn't successfully listing products",
+          context: `CJ product listing keeps failing: "${err.message}". Dropship sourcing isn't producing anything right now — check CJ_API_KEY and CJ account status.`,
+          options: ["I'll check the CJ integration/API key", "Skip CJ dropshipping for now"],
+          thread: "Once CJ listing succeeds again, I'll resume sourcing dropship candidates.",
+        });
       }
+    }
+  }
+
+  // ── 8. Archive legacy products — only after confirming a real replacement
+  //       actually went live this cycle (POD or CJ). Archiving used to
+  //       happen up front based on the LLM's plan alone, so a broken
+  //       Printful/CJ integration meant real merch got pulled with nothing
+  //       to replace it.
+  const legacyToArchive = result.legacyToArchive || [];
+  const hasVerifiedReplacement = createdPODProducts.length > 0 || createdCJProducts.length > 0;
+
+  if (legacyToArchive.length > 0) {
+    if (hasVerifiedReplacement) {
+      for (const productId of legacyToArchive) {
+        try {
+          await shopify.archiveProduct(productId);
+          legacyArchived.push(productId);
+          log("action", `Archived legacy product ${productId} — replacement confirmed live this cycle`);
+        } catch (err) {
+          log("error", `Failed to archive legacy product ${productId}: ${err.message}`);
+        }
+      }
+    } else {
+      log("decision", `Skipped archiving ${legacyToArchive.length} legacy product(s) — no POD/CJ replacement actually went live this cycle. Leaving them up rather than creating a gap.`);
+      addBlockerOnce({
+        title: "Legacy product(s) flagged for replacement, but nothing replaced them",
+        context: `I identified ${legacyToArchive.length} legacy product(s) that should be replaced by POD/CJ equivalents, but every attempt to create the replacement failed this cycle. I'm leaving the old listing(s) live instead of pulling them with nothing to replace them. Check the Printful API key and CJ integration — see the other blocker(s) for specifics.`,
+        options: ["I'll check Printful/CJ", "Archive them anyway even without a confirmed replacement"],
+        thread: "Once a replacement is confirmed live, I'll archive the legacy listing in that same cycle.",
+      });
     }
   }
 

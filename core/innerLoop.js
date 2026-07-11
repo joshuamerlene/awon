@@ -19,6 +19,7 @@
 import { thinkJSON, think, PERSONAS } from "./claude.js";
 import { log } from "./logger.js";
 import { addLearning } from "./memory.js";
+import { addBlockerOnce } from "./queue.js";
 import * as shopify from "../integrations/shopify.js";
 import * as printful from "../integrations/printful.js";
 
@@ -107,6 +108,14 @@ Return JSON:
 
         return `Created and published "${candidate.suggestedTitle}" to Shopify via Printful (ID: ${product.id})`;
       } catch (err) {
+        if (/401|invalid|unauthorized/i.test(err.message)) {
+          addBlockerOnce({
+            title: "Printful API key is invalid — no POD products can go live",
+            context: `Printful is rejecting every request with a 401/Unauthorized error: "${err.message}". Go to printful.com/dashboard/settings/api, regenerate the key, and update PRINTFUL_API_KEY in Railway's env vars.`,
+            options: ["I've updated the Printful API key in Railway", "Skip Printful for now"],
+            thread: "Once the key works again, I'll resume creating and publishing POD products.",
+          });
+        }
         return `Failed to create "${candidate.suggestedTitle}": ${err.message}`;
       }
     },

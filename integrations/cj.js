@@ -80,7 +80,12 @@ export async function searchProducts({ keyword, page = 1, size = 20, categoryId,
     ...(keyword ? { keyWord: keyword } : {}),
     ...(categoryId ? { categoryId } : {}),
     ...(trending ? { productFlag: "0" } : {}), // 0 = trending
-    orderBy: "1", // sort by listing count (popularity)
+    // orderBy 0 = best match (relevance to keyword) — CJ's documented default.
+    // This was hardcoded to "1" (sort by listing count / global popularity),
+    // which ignores keyword relevance entirely — that's why searches like
+    // "pull-up bar" or "ZMA capsules" were returning unrelated high-volume
+    // junk (coffee machines, humidifiers). Best-match sort actually respects keyword.
+    orderBy: "0",
     sort: "desc",
   });
   const data = await cjFetch(`/product/listV2?${params}`);
@@ -100,8 +105,12 @@ export async function getProductDetails(pid) {
  * Get all variants for a CJ product.
  */
 export async function getProductVariants(pid) {
+  // CJ returns the variant array directly as `data` (already unwrapped by
+  // cjFetch) — there is no nested `.variantList` wrapper. The old code read
+  // `data.variantList`, which is always undefined, so this silently returned
+  // [] every time.
   const data = await cjFetch(`/product/variant/query?pid=${pid}`);
-  return data?.variantList || [];
+  return data || [];
 }
 
 /**
@@ -109,9 +118,13 @@ export async function getProductVariants(pid) {
  * Required before you can create orders for it.
  */
 export async function addToMyProducts(pid) {
+  // CJ's addToMyProduct endpoint expects the body key "productId", not "pid".
+  // Sending { pid } meant CJ always saw an empty productId and rejected every
+  // call with "productId must be not empty" (code 1600300) — every dropship
+  // listing attempt was failing right here, before it ever got to Shopify.
   const data = await cjFetch("/product/addToMyProduct", {
     method: "POST",
-    body: JSON.stringify({ pid }),
+    body: JSON.stringify({ productId: pid }),
   });
   return data;
 }
@@ -134,13 +147,19 @@ export async function getCategories() {
  * agent can route orders back to CJ.
  */
 export function buildShopifyProduct(cjProduct, { retailMultiplier = 2.5, brand = "The Rival Is Me" } = {}) {
-  const variants = (cjProduct.variantList || []).map(v => {
-    const cost = parseFloat(v.sellPrice || cjProduct.sellPrice || 0);
+  // CJ's /product/query response calls the variant array "variants", with
+  // fields "variantSellPrice" and "variantSku" — not "variantList" /
+  // "sellPrice" / "sku". Reading the wrong keys meant `variants` was always
+  // [], so every CJ product silently fell into the single-variant fallback
+  // below (which was itself reading a top-level "sku" field that doesn't
+  // exist either — the real field is "productSku").
+  const variants = (cjProduct.variants || []).map(v => {
+    const cost = parseFloat(v.variantSellPrice ?? cjProduct.sellPrice ?? 0);
     const price = (cost * retailMultiplier).toFixed(2);
     return {
-      option1: v.variantNameEn || v.sku,
+      option1: v.variantNameEn || v.variantSku,
       price,
-      sku: v.sku,
+      sku: v.variantSku,
       // Store CJ variant ID in SKU prefix so fulfillment can find it
       // Also stored in product tags below
       inventory_management: null, // no inventory tracking — CJ ships on demand
@@ -153,14 +172,14 @@ export function buildShopifyProduct(cjProduct, { retailMultiplier = 2.5, brand =
     const cost = parseFloat(cjProduct.sellPrice || 0);
     variants.push({
       price: (cost * retailMultiplier).toFixed(2),
-      sku: cjProduct.sku,
+      sku: cjProduct.productSku,
       inventory_management: null,
       requires_shipping: true,
     });
   }
 
   // Build tag list — includes CJ IDs for fulfillment routing
-  const defaultVid = cjProduct.variantList?.[0]?.vid || "";
+  const defaultVid = cjProduct.variants?.[0]?.vid || "";
   const tags = [
     `cj_pid:${cjProduct.id}`,
     ...(defaultVid ? [`cj_vid:${defaultVid}`] : []),

@@ -56,6 +56,20 @@ export function addBlocker({ title, context, options = [], thread = "" }) {
   return blocker.id;
 }
 
+/**
+ * Add a blocker only if a pending one with the same title doesn't already
+ * exist. Use this for failures that repeat every cycle (bad API keys, dead
+ * integrations) so they surface to Josh exactly once instead of either
+ * spamming the queue or — worse — never showing up at all because the
+ * calling code only logs the error and moves on.
+ */
+export function addBlockerOnce({ title, context, options = [], thread = "" }) {
+  const queue = load();
+  const alreadyPending = queue.some((b) => b.title === title && b.resolution === null);
+  if (alreadyPending) return null;
+  return addBlocker({ title, context, options, thread });
+}
+
 /** Get all pending (unresolved) blockers. */
 export function getPendingBlockers() {
   return load().filter((b) => b.resolution === null);
