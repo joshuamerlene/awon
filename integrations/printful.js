@@ -37,8 +37,10 @@ const KEYWORD_TO_CATALOG_MAP = {
   "sweatshirt":     381,  // Unisex Sweatshirt
   "shorts":         508,  // Men's Athletic Shorts
   "joggers":        439,  // Unisex Joggers
-  "tank":           188,  // Unisex Tank Top
-  "tank top":       188,
+  // "tank"/"tank top" intentionally NOT hardcoded — catalog ID 188 (Printful's
+  // old Unisex Tank Top) is deprecated and 404s. Left out on purpose so
+  // searchCatalog() falls through to the live catalog search below instead
+  // of repeatedly hitting a dead ID.
   "long sleeve":    422,  // Unisex Long Sleeve Shirt
   "cap":            75,   // Dad Hat / Baseball Cap
   "hat":            75,

@@ -154,6 +154,16 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
     const urgentPOD = (result.newPODProducts || []).filter(p => p.urgency === "add now");
     log("sub-agent", `Creating ${urgentPOD.length} urgent POD product(s) via Printful...`);
 
+    // Resolve the store logo once for this batch — used as the print design
+    // for every product this cycle. Josh confirmed logo/wordmark-only merch
+    // is fine, so this removes the need for a separately hosted
+    // PRINTFUL_DESIGN_URL — without it, products were syncing with no print
+    // file at all (blank apparel).
+    const logoUrl = await shopify.getStoreLogoUrl();
+    log("system", logoUrl
+      ? `Using store logo as print design: ${logoUrl}`
+      : "Could not resolve a store logo — POD products will sync without a print file.");
+
     for (const candidate of urgentPOD) {
       try {
         // Resolve catalog product + variants
@@ -174,6 +184,7 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
           catalogProductId: catalogProduct.catalogProductId,
           variants: catalogProduct.variants,
           retailPrice: candidate.retailPrice || 34.99,
+          imageUrl: logoUrl,
         });
 
         createdPODProducts.push({

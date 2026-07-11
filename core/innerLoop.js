@@ -93,6 +93,7 @@ Return JSON:
 
       try {
         const catalogProduct = await printful.resolveCatalogProductForKeyword(candidate.printfulSearchKeyword || "t-shirt");
+        const logoUrl = await shopify.getStoreLogoUrl();
 
         const product = await printful.createProduct({
           title: candidate.suggestedTitle,
@@ -100,6 +101,7 @@ Return JSON:
           catalogProductId: catalogProduct.catalogProductId,
           variants: catalogProduct.variants,
           retailPrice: candidate.retailPrice || 34.99,
+          imageUrl: logoUrl,
         });
 
         // Mark as created in memory

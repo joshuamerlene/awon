@@ -266,3 +266,69 @@ export async function createArticle(blogId, { title, body_html, tags, author }) 
   });
   return data?.article;
 }
+
+// ── Files / Media ────────────────────────────────────────────────────────────
+// Admin REST/GraphQL don't expose a direct "shop logo" field (that only
+// exists on the Storefront API, which this app doesn't have a token for).
+// The logo Josh set in Theme Settings lives in settings_data.json as a
+// "shopify://shop_images/<filename>" reference, not a usable URL — resolving
+// it to a real CDN URL requires a Files lookup by filename.
+
+async function graphqlReq(query, variables = {}) {
+  if (!TOKEN) throw new Error("SHOPIFY_ADMIN_API_ACCESS_TOKEN not set — store offline.");
+  const res = await fetch(`${base()}/graphql.json`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ query, variables }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Shopify GraphQL ${res.status}: ${body}`);
+  }
+  const json = await res.json();
+  if (json.errors) throw new Error(`Shopify GraphQL error: ${JSON.stringify(json.errors)}`);
+  return json.data;
+}
+
+/**
+ * Resolve the store's theme logo (Theme Settings → Logo) to a public URL, so
+ * it can be used as the Printful print file instead of needing a separately
+ * hosted design asset. Best-effort — returns null (never throws) if no logo
+ * is set or it can't be resolved, so callers can fall back gracefully rather
+ * than have product creation fail over a missing logo.
+ */
+export async function getStoreLogoUrl() {
+  try {
+    const { settings } = await getThemeSettings();
+    const ref = settings?.current?.logo;
+    if (!ref || typeof ref !== "string") return null;
+
+    // Some stores/newer themes already store a direct URL — use as-is.
+    if (ref.startsWith("http://") || ref.startsWith("https://")) return ref;
+    if (ref.startsWith("//")) return `https:${ref}`;
+
+    // "shopify://shop_images/<filename>" — resolve via the Files API.
+    const match = ref.match(/^shopify:\/\/shop_images\/(.+)$/);
+    if (!match) return null;
+    const filename = decodeURIComponent(match[1]);
+
+    const data = await graphqlReq(
+      `query($q: String!) {
+        files(first: 1, query: $q) {
+          edges {
+            node {
+              ... on MediaImage { image { url } }
+              ... on GenericFile { url }
+            }
+          }
+        }
+      }`,
+      { q: `filename:${filename}` }
+    );
+
+    const node = data?.files?.edges?.[0]?.node;
+    return node?.image?.url || node?.url || null;
+  } catch (err) {
+    return null;
+  }
+}
