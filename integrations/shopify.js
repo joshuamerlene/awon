@@ -55,6 +55,25 @@ export async function archiveProduct(productId) {
   return updateProduct(productId, { status: "archived" });
 }
 
+/**
+ * Reprice a product safely. The old approach — PUT /products/{id}.json with
+ * `variants: [{ price }]` (no variant ids) — REPLACES the variant array, which
+ * Shopify rejects with 422 "Options cannot be blank" on multi-variant products
+ * and can silently clobber variants on single-variant ones. This updates each
+ * existing variant's price through the variants endpoint instead.
+ */
+export async function repriceProduct(productId, newPrice) {
+  const data = await req(`/products/${productId}.json`);
+  const variants = data?.product?.variants || [];
+  for (const v of variants) {
+    await req(`/variants/${v.id}.json`, {
+      method: "PUT",
+      body: JSON.stringify({ variant: { id: v.id, price: String(newPrice) } }),
+    });
+  }
+  return variants.length;
+}
+
 export async function createDiscount({ title, valueType = "percentage", value, code, startsAt, endsAt, usageLimit }) {
   const rule = await req("/price_rules.json", {
     method: "POST",

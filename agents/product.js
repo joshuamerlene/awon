@@ -138,9 +138,7 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
   // ── 5. Reprice ────────────────────────────────────────────────────────────
   for (const reprice of result.repriceSuggestions || []) {
     try {
-      await shopify.updateProduct(reprice.productId, {
-        variants: [{ price: String(reprice.newPrice) }],
-      });
+      await shopify.repriceProduct(reprice.productId, reprice.newPrice);
       log("action", `Repriced ${reprice.productId} → $${reprice.newPrice}: ${reprice.reasoning}`);
     } catch (err) {
       log("error", `Reprice failed (${reprice.productId}): ${err.message}`);
@@ -232,11 +230,45 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
           continue;
         }
 
-        // Pick the best match: highest listing count (popularity), verify it has stock
-        const best = results[0];
+        // Relevance gate: CJ search regularly returns junk for niche terms
+        // (a faucet sprayer for "pull-up bar", B12 drops for "nitric oxide
+        // booster") and blindly listing results[0] put those on the store.
+        // Cheap fast-model check: pick the result that's actually the same
+        // kind of product, or skip the candidate entirely.
+        let best = results[0];
+        try {
+          const pick = await thinkJSON({
+            fast: true,
+            maxTokens: 200,
+            system: "You verify whether product search results match a sourcing request. Respond with JSON only.",
+            prompt: `Sourcing request: "${candidate.description}"
+CJ search results:
+${results.map((r, i) => `${i}: ${r.nameEn} ($${r.sellPrice})`).join("\n")}
+
+If one of these is genuinely the same kind of product as the request, return {"match": true, "index": <its number>}. If none are, return {"match": false}.`,
+          });
+          if (pick && pick.match === false) {
+            log("system", `CJ search for "${keyword}" had no relevant match (top result: "${results[0].nameEn}") — skipping candidate.`);
+            continue;
+          }
+          if (pick && Number.isInteger(pick.index) && results[pick.index]) best = results[pick.index];
+        } catch {
+          // Gate is best-effort — fall back to top result rather than stall sourcing.
+        }
         log("sub-agent", `CJ best match for "${keyword}": "${best.nameEn}" @ $${best.sellPrice} (${best.listedNum} listings)`);
 
-        // Add to my CJ products (required before ordering)
+        // Dedupe guard: if this exact CJ product is already live on Shopify
+        // (tagged cj_pid:<id> at creation), don't list it again. Search is
+        // deterministic, so consecutive cycles pick the same best match —
+        // without this check every cycle would create a duplicate listing.
+        const alreadyListed = products.some(p => (p.tags || "").includes(`cj_pid:${best.id}`));
+        if (alreadyListed) {
+          log("system", `CJ product "${best.nameEn}" (${best.id}) is already listed on Shopify — skipping duplicate.`);
+          continue;
+        }
+
+        // Add to my CJ products (required before ordering). Code 100002
+        // ("already added") is treated as success inside addToMyProducts.
         await cj.addToMyProducts(best.id);
 
         // Get full details + variants
@@ -259,7 +291,7 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
           title: created.title,
           cjPid: best.id,
           cjSku: best.sku,
-          cogs: parseFloat(best.sellPrice),
+          cogs: cj.parseCJPrice(best.sellPrice),
           retailPrice: parseFloat(created.variants?.[0]?.price),
           replacedProductId: candidate.replacesProductId || null,
         });

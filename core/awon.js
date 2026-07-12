@@ -200,25 +200,11 @@ Reply to Josh directly, in 1-3 sentences, plain text. Tell him what you're actua
   }
 
   // ── 5. Execute catalog actions ─────────────────────────────────────────────
+  // NOTE: reprices and kills are executed by the product agent itself
+  // (agents/product.js steps 4–5). They used to ALSO be re-executed here,
+  // so every reprice and archive ran twice per cycle (visible as duplicate
+  // "Repriced …" / "Archived …" pairs in the activity log). Removed.
   if (productRecs) {
-    for (const reprice of productRecs.repriceSuggestions || []) {
-      try {
-        await shopify.updateProduct(reprice.productId, { variants: [{ price: String(reprice.newPrice) }] });
-        log("action", `Repriced product ${reprice.productId} → $${reprice.newPrice}: ${reprice.reasoning}`);
-      } catch (err) {
-        log("error", `Reprice failed (${reprice.productId}): ${err.message}`);
-      }
-    }
-
-    for (const id of productRecs.kill || []) {
-      try {
-        await shopify.archiveProduct(id);
-        log("action", `Archived underperforming product ${id}`);
-      } catch (err) {
-        log("error", `Archive failed (${id}): ${err.message}`);
-      }
-    }
-
     // Log POD products that were created this cycle
     if ((productRecs.createdPODProducts || []).length > 0) {
       log("action", `POD products created this cycle: ${productRecs.createdPODProducts.map(p => `"${p.title}"`).join(", ")}`);
