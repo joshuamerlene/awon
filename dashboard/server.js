@@ -42,6 +42,10 @@ export function startDashboard() {
   const app = express();
   app.use(express.json());
   app.use(express.static(path.join(__dirname, "public")));
+  // Generated print designs (integrations/design.js) — must be publicly
+  // fetchable (no token) so Printful's mockup generator and order API can
+  // pull the files. Served from the persistent Volume.
+  app.use("/designs", express.static(path.join(__dirname, "..", "data", "designs")));
 
   // Simple auth middleware
   function auth(req, res, next) {

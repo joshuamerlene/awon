@@ -18,6 +18,7 @@ import { addBlockerOnce } from "../core/queue.js";
 import * as shopify from "../integrations/shopify.js";
 import * as cj from "../integrations/cj.js";
 import * as printful from "../integrations/printful.js";
+import * as design from "../integrations/design.js";
 
 // Shopify order fulfillment statuses we should act on
 const UNFULFILLED = ["unfulfilled", "partial"];
@@ -82,7 +83,14 @@ export async function runFulfillmentAgent({ orders, memory }) {
           log("system", `Fulfillment: product ${item.product_id} tagged pf_dropship but SKU "${item.sku}" has no PF variant id — skipping item "${item.title}"`);
           continue;
         }
-        pfItems.push({ variantId, quantity: item.quantity, retailPrice: item.price });
+        pfItems.push({
+          variantId,
+          quantity: item.quantity,
+          retailPrice: item.price,
+          // Per-product design (e.g. a text design) — falls back to the
+          // shared logo design inside createFulfillmentOrder when null.
+          designUrl: design.getProductDesign(item.product_id) || undefined,
+        });
       }
 
       if (pfItems.length > 0) {

@@ -326,7 +326,12 @@ export function variantIdFromSku(sku = "") {
  * Returns { id, status } of the Printful order.
  */
 export async function createFulfillmentOrder(shopifyOrder, items, { designUrl, confirm = false } = {}) {
-  if (!designUrl) throw new Error("Printful fulfillment needs a design URL (store logo unresolved).");
+  // Items may carry their own designUrl (per-product designs, e.g. text
+  // designs from integrations/design.js); the shared designUrl is the
+  // fallback. Only fail if some item would end up with no print file at all.
+  if (!designUrl && items.some(i => !i.designUrl)) {
+    throw new Error("Printful fulfillment needs a design URL (store logo unresolved).");
+  }
 
   const addr = shopifyOrder.shipping_address || shopifyOrder.billing_address || {};
   const payload = {
@@ -346,7 +351,7 @@ export async function createFulfillmentOrder(shopifyOrder, items, { designUrl, c
       variant_id: item.variantId,
       quantity: item.quantity,
       retail_price: item.retailPrice != null ? String(item.retailPrice) : undefined,
-      files: [{ url: designUrl }],
+      files: [{ url: item.designUrl || designUrl }],
     })),
   };
 

@@ -22,6 +22,7 @@ import { addBlockerOnce } from "../core/queue.js";
 import * as shopify from "../integrations/shopify.js";
 import * as printful from "../integrations/printful.js";
 import * as cj from "../integrations/cj.js";
+import * as design from "../integrations/design.js";
 
 // Products that should be replaced by POD equivalents (titles are partial matches)
 const LEGACY_PRODUCTS_TO_REPLACE = [
@@ -92,7 +93,8 @@ Return JSON:
       "suggestedDescription": "HTML description in The Rival Is Me voice",
       "retailPrice": 34.99,
       "contentAngle": "how to feature this on TikTok",
-      "urgency": "add now|add soon|test first"
+      "urgency": "add now|add soon|test first",
+      "design": { "type": "logo|text", "text": "TRIM", "color": "white|black" }
     }
   ],
   "newDropshipCandidates": [
@@ -108,6 +110,12 @@ Return JSON:
     }
   ]
 }
+
+PRINT DESIGNS — each newPODProduct picks its own via "design":
+- "type": "logo" prints the brand logo mark. "type": "text" renders your text in Archivo Black (the brand's own heading typeface), ALL CAPS, transparent background, front placement.
+- Text designs are where the brand voice lives on merch. "TRIM" is the brand acronym for THE RIVAL IS ME — a strong, clean design on its own. Other good text: short discipline-forward statements, 1-3 words per line, max 2 lines (separate lines with \\n). Think "TRIM", "THE RIVAL\\nIS ME", "DISCIPLINE\\nFIRST", "NO ONE\\nIS COMING". Never long sentences.
+- "color": "white" for dark garments (the brand default), "black" only when the product will be light-colored.
+- Vary the catalog: don't put the identical design on everything — mix logo pieces and different text pieces.
 
 HARD RULE on "kill" and "replacesProductId": products Josh added by hand are HIS. You may suggest removals in "kill" (they will be shown to him, not executed), but never target his manual listings with replacesProductId unless the listing is literally an Amazon affiliate link. An empty supplements or equipment collection is a catalog failure, not a cleanup win — prefer improving copy/imagery of existing listings over removing them.
 
@@ -186,6 +194,20 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
           continue;
         }
 
+        // Resolve this product's print design: brand text rendered in
+        // Archivo Black if the model asked for it, otherwise the logo.
+        // A failed text render falls back to the logo — never blocks.
+        let designUrl = logoUrl;
+        if (candidate.design?.type === "text" && candidate.design?.text) {
+          try {
+            const rendered = await design.renderTextDesign(candidate.design.text, { color: candidate.design.color });
+            designUrl = rendered.url;
+            log("action", `Rendered brand text design "${String(candidate.design.text).replace(/\n/g, " / ")}" (${candidate.design.color || "white"}) for "${candidate.suggestedTitle}" → ${rendered.url}`);
+          } catch (err) {
+            log("error", `Text design render failed for "${candidate.suggestedTitle}" (${err.message}) — using store logo instead.`);
+          }
+        }
+
         // Create sync product — Printful auto-syncs to Shopify
         const product = await printful.createProduct({
           title: candidate.suggestedTitle,
@@ -193,8 +215,14 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
           catalogProductId: catalogProduct.catalogProductId,
           variants: catalogProduct.variants,
           retailPrice: candidate.retailPrice || 34.99,
-          imageUrl: logoUrl,
+          imageUrl: designUrl,
         });
+
+        // Remember which design this product was created with, so
+        // fulfillment prints the same art the listing shows.
+        if (designUrl && designUrl !== logoUrl) {
+          design.saveProductDesign(product.id, designUrl);
+        }
 
         createdPODProducts.push({
           printfulId: product.id,
