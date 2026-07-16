@@ -18,8 +18,25 @@ import path from "path";
 import { fileURLToPath } from "url";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegPath from "@ffmpeg-installer/ffmpeg";
+import ffprobePath from "@ffprobe-installer/ffprobe";
 
 ffmpeg.setFfmpegPath(ffmpegPath.path);
+// ffprobe is a SEPARATE binary — fluent-ffmpeg needs it for probing AND for
+// mergeToFile/concat. Without it every multi-segment splice died with
+// "Cannot find ffprobe" (first seen live on cycle #162's post 1).
+ffmpeg.setFfprobePath(ffprobePath.path);
+
+/**
+ * Wrap fluent-ffmpeg's error into something diagnosable — err.message alone
+ * is usually just "ffmpeg exited with code 1: Conversion failed!" which says
+ * nothing. Append the tail of stderr where the real reason lives.
+ */
+function rejectWithStderr(reject) {
+  return (err, stdout, stderr) => {
+    const tail = String(stderr || "").trim().split("\n").slice(-6).join(" | ").slice(-500);
+    reject(new Error(`${err.message}${tail ? ` — stderr: ${tail}` : ""}`));
+  };
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAW_DIR = path.join(__dirname, "..", "data", "raw-footage");
@@ -74,7 +91,7 @@ export function trimClip(inputPath, outputFilename, { startSec = 0, durationSec 
     cmd
       .output(outputPath)
       .on("end", () => resolve(outputPath))
-      .on("error", reject)
+      .on("error", rejectWithStderr(reject))
       .run();
   });
 }
@@ -88,7 +105,7 @@ export function concatClips(inputPaths, outputFilename) {
     inputPaths.forEach((p) => cmd.input(p));
     cmd
       .on("end", () => resolve(outputPath))
-      .on("error", reject)
+      .on("error", rejectWithStderr(reject))
       .mergeToFile(outputPath, path.join(EDITED_DIR, "_tmp"));
   });
 }
@@ -112,7 +129,7 @@ export function prepareForTikTok(inputPath, outputFilename) {
       .outputOptions(["-pix_fmt yuv420p", "-movflags +faststart"])
       .output(outputPath)
       .on("end", () => resolve(outputPath))
-      .on("error", reject)
+      .on("error", rejectWithStderr(reject))
       .run();
   });
 }
@@ -129,14 +146,19 @@ export function addTextOverlay(inputPath, outputFilename, text, { startSec = 0, 
   const safeText = text.replace(/[\\':]/g, (c) => `\\${c}`);
   const enableExpr = durationSec ? `:enable='between(t,${startSec},${startSec + durationSec})'` : "";
 
-  return new Promise((resolve, reject) => {
+  // FAIL-SOFT: the hook overlay is nice-to-have, the post itself is the job.
+  // drawtext depends on a font being findable inside the container, which is
+  // exactly the kind of thing that breaks on a slim Railway image. If the
+  // overlay fails for any reason, deliver the un-captioned video instead of
+  // killing the whole post.
+  return new Promise((resolve) => {
     ffmpeg(inputPath)
       .videoFilters(
         `drawtext=text='${safeText}':fontcolor=white:fontsize=64:borderw=4:bordercolor=black:x=(w-text_w)/2:y=h*0.72${enableExpr}`
       )
       .output(outputPath)
       .on("end", () => resolve(outputPath))
-      .on("error", reject)
+      .on("error", () => resolve(inputPath))
       .run();
   });
 }

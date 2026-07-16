@@ -59,6 +59,8 @@ const STALE_BELIEF_PATTERNS = [
   /deadline (threat|forces)/i,
   /delegation model/i,
   /content agent ran \(false\)/i,
+  /commitment gate/i,
+  /assumes? exclusive/i,
 ];
 
 function scrubStaleBeliefs(memory) {
@@ -92,8 +94,11 @@ export function saveMemory(memory) {
 }
 
 export function addLearning(memory, learning) {
+  // The model sometimes returns an object here — stringify it instead of
+  // storing "[object Object]" in the sandbox.
+  if (typeof learning !== "string") learning = JSON.stringify(learning);
   // Refuse to re-learn a scrubbed stale belief (see STALE_BELIEF_PATTERNS).
-  if (STALE_BELIEF_PATTERNS.some((rx) => rx.test(String(learning)))) return;
+  if (STALE_BELIEF_PATTERNS.some((rx) => rx.test(learning))) return;
   memory.learnings.unshift({
     date: new Date().toISOString(),
     insight: learning,
