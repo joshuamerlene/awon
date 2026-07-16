@@ -217,7 +217,21 @@ export async function publishVideo({ videoPath, videoUrl, caption, hashtags = []
     }),
   });
 
-  if (!initRes.ok) throw new Error(`TikTok publish init error ${initRes.status}: ${await initRes.text()}`);
+  if (!initRes.ok) {
+    const body = await initRes.text();
+    // Sandbox reality (hit live 2026-07-16): an unaudited client may only post
+    // to accounts whose PROFILE is set to private — this is separate from the
+    // per-post SELF_ONLY privacy level. Surface the actual fix instead of a
+    // generic API error.
+    if (body.includes("unaudited_client_can_only_post_to_private_accounts")) {
+      throw new Error(
+        "TikTok sandbox rule: @the.rival.is.me must be a PRIVATE account for this unaudited app to post. " +
+        "Fix in the TikTok app: Profile → Settings & privacy → Privacy → turn ON 'Private account'. " +
+        "Posts still land SELF_ONLY; after posting you can flip the account back to public and set each video's visibility manually."
+      );
+    }
+    throw new Error(`TikTok publish init error ${initRes.status}: ${body}`);
+  }
   const initData = await initRes.json();
   const publishId = initData?.data?.publish_id;
   const uploadUrl = initData?.data?.upload_url;
