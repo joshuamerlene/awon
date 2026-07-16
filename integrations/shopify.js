@@ -317,6 +317,12 @@ async function graphqlReq(query, variables = {}) {
  * than have product creation fail over a missing logo.
  */
 export async function getStoreLogoUrl() {
+  // A dedicated print design beats the site logo: the theme logo needs a
+  // visible background to read on the dark site header, while the PRINT file
+  // should be transparent-background art. If PRINTFUL_DESIGN_URL is set in
+  // Railway (e.g. the transparent logo uploaded to Shopify Files), use it and
+  // skip theme-logo resolution entirely.
+  if (process.env.PRINTFUL_DESIGN_URL) return process.env.PRINTFUL_DESIGN_URL;
   try {
     const { settings } = await getThemeSettings();
     const ref = settings?.current?.logo;

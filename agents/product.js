@@ -109,6 +109,8 @@ Return JSON:
   ]
 }
 
+HARD RULE on "kill" and "replacesProductId": products Josh added by hand are HIS. You may suggest removals in "kill" (they will be shown to him, not executed), but never target his manual listings with replacesProductId unless the listing is literally an Amazon affiliate link. An empty supplements or equipment collection is a catalog failure, not a cleanup win — prefer improving copy/imagery of existing listings over removing them.
+
 Be decisive. If the catalog needs cleanup, call it. If Printful is available, recommend 2-3 specific POD fitness products to add NOW. Use printfulSearchKeyword values like: "t-shirt", "hoodie", "shorts", "joggers", "tank", "hat", "sweatshirt". If a note or the catalog itself points to Amazon-affiliate-link products (near-zero margin, not real inventory), treat replacing them with an owned-margin CJ dropship equivalent as high urgency — set "urgency": "add now" and fill in "replacesProductId" with that product's id so it gets swapped out, not just added alongside.`,
   });
 
@@ -123,16 +125,25 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
   // so the dedup check just below has something to read; step 8 fills it in.
   const legacyArchived = [];
 
-  // ── 4. Archive underperformers ────────────────────────────────────────────
-  for (const productId of result.kill || []) {
-    // Don't double-archive
-    if (legacyArchived.includes(productId)) continue;
-    try {
-      await shopify.archiveProduct(productId);
-      log("action", `Archived underperformer ${productId}`);
-    } catch (err) {
-      log("error", `Archive failed (${productId}): ${err.message}`);
-    }
+  // ── 4. "Underperformers" — SUGGEST, never auto-archive ───────────────────
+  // This used to archive whatever the model put in "kill" immediately. With
+  // zero orders there IS no performance data, so "underperformer" was really
+  // "product the model didn't like" — and it kept unlisting products Josh
+  // added by hand (supplements, equipment, CJ items), emptying whole
+  // collections. Removing a live product is Josh's call: surface it as a
+  // dashboard blocker and touch nothing.
+  const killSuggestions = (result.kill || []).filter(id => !legacyArchived.includes(id));
+  if (killSuggestions.length > 0) {
+    const names = killSuggestions
+      .map(id => products.find(p => String(p.id) === String(id))?.title || id)
+      .join(", ");
+    log("decision", `Model suggests removing ${killSuggestions.length} product(s) (${names}) — NOT archiving. Left live; flagged for Josh to decide.`);
+    addBlockerOnce({
+      title: "Product removal suggestions — your call, nothing was touched",
+      context: `Based on brand fit (there's no sales data yet), I'd consider removing: ${names}. I have NOT archived anything — products you added stay up unless you say otherwise.`,
+      options: ["Leave them all up", "I'll archive the ones I agree with myself"],
+      thread: "Whatever you decide, I'll stop re-suggesting these.",
+    });
   }
 
   // ── 5. Reprice ────────────────────────────────────────────────────────────
@@ -305,15 +316,23 @@ If one of these is genuinely the same kind of product as the request, return {"m
 
         log("action", `CJ product live on Shopify: "${created.title}" — $${created.variants?.[0]?.price} retail, $${best.sellPrice} COGS`);
 
-        // If this was replacing an existing low-margin listing (e.g. an Amazon
-        // affiliate link placeholder), archive the old one now that its
-        // owned-margin replacement is confirmed live.
+        // If this was replacing an existing low-margin listing, archive the
+        // old one — but ONLY if it's verifiably an Amazon affiliate
+        // placeholder (the one category Josh explicitly approved swapping
+        // out). The model was pointing replacesProductId at Josh's own real
+        // listings, which then got silently unlisted.
         if (candidate.replacesProductId) {
-          try {
-            await shopify.archiveProduct(candidate.replacesProductId);
-            log("action", `Archived old listing ${candidate.replacesProductId} — replaced by CJ dropship product "${created.title}"`);
-          } catch (archiveErr) {
-            log("error", `Created replacement product but failed to archive old listing ${candidate.replacesProductId}: ${archiveErr.message}`);
+          const target = products.find(p => String(p.id) === String(candidate.replacesProductId));
+          const isAffiliatePlaceholder = /amazon\.|amzn\./i.test(target?.body_html || "");
+          if (isAffiliatePlaceholder) {
+            try {
+              await shopify.archiveProduct(candidate.replacesProductId);
+              log("action", `Archived Amazon-affiliate listing ${candidate.replacesProductId} — replaced by CJ dropship product "${created.title}"`);
+            } catch (archiveErr) {
+              log("error", `Created replacement product but failed to archive old listing ${candidate.replacesProductId}: ${archiveErr.message}`);
+            }
+          } else {
+            log("decision", `Replacement "${created.title}" is live, but target ${candidate.replacesProductId} ("${target?.title || "unknown"}") is NOT an Amazon affiliate listing — leaving it up. Removing real listings is Josh's call.`);
           }
         }
 

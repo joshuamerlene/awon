@@ -166,7 +166,16 @@ export async function resolveCatalogProductForKeyword(keyword) {
  * an array of mockup image URLs. Returns [] on any failure — callers fall
  * back to the catalog's stock variant image.
  */
-export async function generateMockups(catalogProductId, variantIds, designUrl, { placement = "front", maxWaitMs = 25_000 } = {}) {
+export async function generateMockups(catalogProductId, variantIds, designUrl, { placement = "front", maxWaitMs = 90_000 } = {}) {
+  // maxWaitMs was 25s — Printful mockup tasks routinely take 30-60s+, so
+  // nearly every task "failed" by timeout, silently fell back to the blank
+  // stock garment photo, and the whole storefront looked like undesigned
+  // merch. 90s covers the real distribution; failures now log a reason
+  // instead of vanishing.
+  const fail = (reason) => {
+    console.error(`[printful] Mockup generation failed for catalog ${catalogProductId}: ${reason} — falling back to stock (blank) product image.`);
+    return [];
+  };
   try {
     let task;
     try {
@@ -191,20 +200,24 @@ export async function generateMockups(catalogProductId, variantIds, designUrl, {
     }
 
     const taskKey = task?.task_key;
-    if (!taskKey) return [];
+    if (!taskKey) return fail("no task_key returned from create-task");
 
     const deadline = Date.now() + maxWaitMs;
     while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 4000));
+      await new Promise(r => setTimeout(r, 5000));
       const result = await pf(`/mockup-generator/task?task_key=${encodeURIComponent(taskKey)}`);
       if (result?.status === "completed") {
-        return (result.mockups || []).map(m => m.mockup_url).filter(Boolean);
+        const urls = (result.mockups || []).map(m => m.mockup_url).filter(Boolean);
+        if (urls.length === 0) return fail("task completed but returned no mockup URLs");
+        return urls;
       }
-      if (result?.status === "failed") return [];
+      if (result?.status === "failed") {
+        return fail(`task failed: ${result?.error || JSON.stringify(result).slice(0, 200)}`);
+      }
     }
-    return [];
-  } catch {
-    return [];
+    return fail(`timed out after ${Math.round(maxWaitMs / 1000)}s`);
+  } catch (err) {
+    return fail(err.message);
   }
 }
 
