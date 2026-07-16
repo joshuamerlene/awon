@@ -19,8 +19,11 @@
 
 import express from "express";
 import path from "path";
+import fs from "fs";
+import os from "os";
 import { fileURLToPath } from "url";
 import multer from "multer";
+import unzipper from "unzipper";
 import { getAllBlockers, resolveBlocker, getPendingBlockers } from "../core/queue.js";
 import { addNote, getAllNotes } from "../core/notes.js";
 import { getLog } from "../core/logger.js";
@@ -178,11 +181,53 @@ export function startDashboard() {
     }
   });
 
-  app.post("/api/footage/upload", footageUpload.array("files", 10), (req, res) => {
+  app.post("/api/footage/upload", footageUpload.array("files", 50), (req, res) => {
     try {
       res.json({ success: true, uploaded: (req.files || []).map((f) => f.filename) });
     } catch (err) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Bulk footage import (zip) ──────────────────────────────────────────────
+  // Accepts a .zip archive (e.g. a TikTok data export) and extracts every
+  // video file inside into raw-footage. Entries are streamed one at a time,
+  // so multi-GB archives don't blow up memory.
+  const zipUpload = multer({
+    storage: multer.diskStorage({
+      destination: (req, file, cb) => cb(null, os.tmpdir()),
+      filename: (req, file, cb) => cb(null, `footage_import_${Date.now()}.zip`),
+    }),
+    limits: { fileSize: 4 * 1024 * 1024 * 1024 }, // 4GB archive cap
+    fileFilter: (req, file, cb) => {
+      if (/\.zip$/i.test(file.originalname)) cb(null, true);
+      else cb(new Error("Only .zip archives are accepted on this endpoint."));
+    },
+  });
+
+  app.post("/api/footage/upload-zip", zipUpload.single("archive"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "No zip uploaded (field name: archive)." });
+    const extracted = [];
+    let skipped = 0;
+    try {
+      const directory = await unzipper.Open.file(req.file.path);
+      let i = 0;
+      for (const entry of directory.files) {
+        if (entry.type !== "File") continue;
+        const base = path.basename(entry.path);
+        if (!/\.(mp4|mov|m4v)$/i.test(base)) { skipped++; continue; }
+        const safe = `${Date.now()}_${i++}-${base.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+        const dest = path.join(video.rawFootageDir(), safe);
+        await new Promise((resolve, reject) =>
+          entry.stream().pipe(fs.createWriteStream(dest)).on("finish", resolve).on("error", reject)
+        );
+        extracted.push(safe);
+      }
+      res.json({ success: true, extracted: extracted.length, skippedNonVideo: skipped, files: extracted });
+    } catch (err) {
+      res.status(500).json({ error: `Zip import failed: ${err.message}` });
+    } finally {
+      fs.unlink(req.file.path, () => {});
     }
   });
 

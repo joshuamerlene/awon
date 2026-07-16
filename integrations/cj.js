@@ -61,7 +61,10 @@ async function cjFetch(path, options = {}) {
     },
   });
   const data = await res.json();
-  if (!data.result && data.code !== 200) {
+  // okCodes: CJ body codes the caller considers success (e.g. 100002
+  // "already added" on addToMyProduct — an idempotent success, not a failure).
+  const okCodes = options.okCodes || [];
+  if (!data.result && data.code !== 200 && !okCodes.includes(data.code)) {
     throw new Error(`CJ ${res.status} on ${options.method || "GET"} ${path}: ${data.message} (code ${data.code})`);
   }
   return data.data;
@@ -122,9 +125,15 @@ export async function addToMyProducts(pid) {
   // Sending { pid } meant CJ always saw an empty productId and rejected every
   // call with "productId must be not empty" (code 1600300) — every dropship
   // listing attempt was failing right here, before it ever got to Shopify.
+  // Code 100002 ("The product has been added to My Products") is CJ's
+  // duplicate-add response — the product is ALREADY in My Products, which is
+  // exactly the state we want. Treating it as an error was killing the whole
+  // listing flow on any re-add, so sourcing produced nothing while CJ itself
+  // was perfectly healthy.
   const data = await cjFetch("/product/addToMyProduct", {
     method: "POST",
     body: JSON.stringify({ productId: pid }),
+    okCodes: [100002],
   });
   return data;
 }
@@ -146,6 +155,20 @@ export async function getCategories() {
  * Tags include cj_pid and cj_vid for the default variant so fulfillment
  * agent can route orders back to CJ.
  */
+/**
+ * CJ prices sometimes arrive as a RANGE string like "11.61 -- 46.44" (min and
+ * max across variants). parseFloat() silently takes the LOW end, so retail
+ * was being computed off the cheapest variant while the shipped variant could
+ * cost 4x that — i.e. selling below COGS. Parse conservatively: use the HIGH
+ * end of a range for cost/pricing decisions.
+ */
+export function parseCJPrice(value) {
+  if (value == null) return 0;
+  if (typeof value === "number") return value;
+  const nums = String(value).match(/\d+(?:\.\d+)?/g)?.map(Number) || [];
+  return nums.length ? Math.max(...nums) : 0;
+}
+
 export function buildShopifyProduct(cjProduct, { retailMultiplier = 2.5, brand = "The Rival Is Me" } = {}) {
   // CJ's /product/query response calls the variant array "variants", with
   // fields "variantSellPrice" and "variantSku" — not "variantList" /
@@ -154,7 +177,7 @@ export function buildShopifyProduct(cjProduct, { retailMultiplier = 2.5, brand =
   // below (which was itself reading a top-level "sku" field that doesn't
   // exist either — the real field is "productSku").
   const variants = (cjProduct.variants || []).map(v => {
-    const cost = parseFloat(v.variantSellPrice ?? cjProduct.sellPrice ?? 0);
+    const cost = parseCJPrice(v.variantSellPrice ?? cjProduct.sellPrice);
     const price = (cost * retailMultiplier).toFixed(2);
     return {
       option1: v.variantNameEn || v.variantSku,
@@ -169,7 +192,7 @@ export function buildShopifyProduct(cjProduct, { retailMultiplier = 2.5, brand =
 
   // Default to single variant if no variant list
   if (variants.length === 0) {
-    const cost = parseFloat(cjProduct.sellPrice || 0);
+    const cost = parseCJPrice(cjProduct.sellPrice);
     variants.push({
       price: (cost * retailMultiplier).toFixed(2),
       sku: cjProduct.productSku,

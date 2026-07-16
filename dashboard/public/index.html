@@ -249,9 +249,9 @@
         <span class="panel-title">Raw Footage For Awon To Edit</span>
       </div>
       <div class="footage-drop">
-        <input type="file" id="footage-input" accept=".mp4,.mov,.m4v" multiple />
+        <input type="file" id="footage-input" accept=".mp4,.mov,.m4v,.zip" multiple />
         <button class="resolve-btn" onclick="uploadFootage()" style="margin-left:12px;">Upload</button>
-        <div style="font-size:11px;color:var(--muted);margin-top:8px;">mp4, mov, or m4v — up to 500MB each. Awon can trim, join, caption, and reframe these for TikTok.</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px;">mp4, mov, m4v — up to 500MB each, 50 at a time. Or drop a .zip (like a TikTok data export) and every video inside gets imported. Awon trims, splices, captions, and reframes these into TikTok posts.</div>
       </div>
       <div class="footage-list" id="footage-container">
         <div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No footage uploaded yet.</div>
@@ -460,18 +460,40 @@ async function loadFootage() {
 async function uploadFootage() {
   const input = document.getElementById("footage-input");
   if (!input.files.length) { input.focus(); return; }
-  const formData = new FormData();
-  for (const file of input.files) formData.append("files", file);
+
+  const files = [...input.files];
+  const zips = files.filter(f => /\.zip$/i.test(f.name));
+  const videos = files.filter(f => !/\.zip$/i.test(f.name));
+
   try {
-    const res = await fetch("/api/footage/upload", {
-      method: "POST",
-      headers: { "x-dashboard-token": TOKEN },
-      body: formData,
-    });
-    if (!res.ok) throw new Error();
+    // Zip archives (e.g. TikTok data export) go to the bulk-import endpoint one at a time
+    for (const zip of zips) {
+      const zipForm = new FormData();
+      zipForm.append("archive", zip);
+      const zipRes = await fetch("/api/footage/upload-zip", {
+        method: "POST",
+        headers: { "x-dashboard-token": TOKEN },
+        body: zipForm,
+      });
+      if (!zipRes.ok) throw new Error();
+      const result = await zipRes.json();
+      alert(`Imported ${result.extracted} video(s) from ${zip.name}.`);
+    }
+
+    if (videos.length > 0) {
+      const formData = new FormData();
+      for (const file of videos) formData.append("files", file);
+      const res = await fetch("/api/footage/upload", {
+        method: "POST",
+        headers: { "x-dashboard-token": TOKEN },
+        body: formData,
+      });
+      if (!res.ok) throw new Error();
+    }
+
     input.value = "";
     loadFootage();
-  } catch(e) { alert("Upload failed. Try again — files must be mp4/mov/m4v under 500MB."); }
+  } catch(e) { alert("Upload failed. Try again — videos must be mp4/mov/m4v under 500MB, archives must be .zip."); }
 }
 
 async function loadNotes() {

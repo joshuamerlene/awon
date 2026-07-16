@@ -138,9 +138,7 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
   // ── 5. Reprice ────────────────────────────────────────────────────────────
   for (const reprice of result.repriceSuggestions || []) {
     try {
-      await shopify.updateProduct(reprice.productId, {
-        variants: [{ price: String(reprice.newPrice) }],
-      });
+      await shopify.repriceProduct(reprice.productId, reprice.newPrice);
       log("action", `Repriced ${reprice.productId} → $${reprice.newPrice}: ${reprice.reasoning}`);
     } catch (err) {
       log("error", `Reprice failed (${reprice.productId}): ${err.message}`);
@@ -195,11 +193,18 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
           contentAngle: candidate.contentAngle,
         });
 
-        log("action", `POD product live: "${candidate.suggestedTitle}" — Printful ID ${product.id} (synced to Shopify)`);
+        log("action", `POD product live on Shopify: "${candidate.suggestedTitle}" — product ID ${product.id} (Printful catalog ${catalogProduct.catalogProductId})`);
 
       } catch (err) {
         log("error", `Printful product creation failed for "${candidate.printfulSearchKeyword}": ${err.message}`);
-        if (/401|invalid|unauthorized/i.test(err.message)) {
+        if (/Manual Order \/ API platform/i.test(err.message)) {
+          addBlockerOnce({
+            title: "Printful store is the wrong platform type — POD is blocked",
+            context: `Printful rejected the request because the connected store is a Shopify-platform store, and this API flow needs a "Manual order platform / API" store. One-time fix: in Printful go to Stores → Add store → choose "Manual order platform / API", then set PRINTFUL_STORE_ID in Railway to the new store's ID (I can list IDs via GET /stores). No Shopify-side changes needed — I create the Shopify listings myself.`,
+            options: ["I created the Manual/API store and set PRINTFUL_STORE_ID", "Skip Printful for now"],
+            thread: "Once the store ID points at a Manual/API store, POD creation will work on the next cycle.",
+          });
+        } else if (/401|invalid|unauthorized/i.test(err.message)) {
           addBlockerOnce({
             title: "Printful API key is invalid — no POD products can go live",
             context: `Printful is rejecting every request with a 401/Unauthorized error: "${err.message}". This means no new POD products can be created or synced to Shopify. Go to printful.com/dashboard/settings/api, regenerate the key, and update PRINTFUL_API_KEY in Railway's env vars.`,
@@ -232,11 +237,45 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
           continue;
         }
 
-        // Pick the best match: highest listing count (popularity), verify it has stock
-        const best = results[0];
+        // Relevance gate: CJ search regularly returns junk for niche terms
+        // (a faucet sprayer for "pull-up bar", B12 drops for "nitric oxide
+        // booster") and blindly listing results[0] put those on the store.
+        // Cheap fast-model check: pick the result that's actually the same
+        // kind of product, or skip the candidate entirely.
+        let best = results[0];
+        try {
+          const pick = await thinkJSON({
+            fast: true,
+            maxTokens: 200,
+            system: "You verify whether product search results match a sourcing request. Respond with JSON only.",
+            prompt: `Sourcing request: "${candidate.description}"
+CJ search results:
+${results.map((r, i) => `${i}: ${r.nameEn} ($${r.sellPrice})`).join("\n")}
+
+If one of these is genuinely the same kind of product as the request, return {"match": true, "index": <its number>}. If none are, return {"match": false}.`,
+          });
+          if (pick && pick.match === false) {
+            log("system", `CJ search for "${keyword}" had no relevant match (top result: "${results[0].nameEn}") — skipping candidate.`);
+            continue;
+          }
+          if (pick && Number.isInteger(pick.index) && results[pick.index]) best = results[pick.index];
+        } catch {
+          // Gate is best-effort — fall back to top result rather than stall sourcing.
+        }
         log("sub-agent", `CJ best match for "${keyword}": "${best.nameEn}" @ $${best.sellPrice} (${best.listedNum} listings)`);
 
-        // Add to my CJ products (required before ordering)
+        // Dedupe guard: if this exact CJ product is already live on Shopify
+        // (tagged cj_pid:<id> at creation), don't list it again. Search is
+        // deterministic, so consecutive cycles pick the same best match —
+        // without this check every cycle would create a duplicate listing.
+        const alreadyListed = products.some(p => (p.tags || "").includes(`cj_pid:${best.id}`));
+        if (alreadyListed) {
+          log("system", `CJ product "${best.nameEn}" (${best.id}) is already listed on Shopify — skipping duplicate.`);
+          continue;
+        }
+
+        // Add to my CJ products (required before ordering). Code 100002
+        // ("already added") is treated as success inside addToMyProducts.
         await cj.addToMyProducts(best.id);
 
         // Get full details + variants
@@ -259,7 +298,7 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
           title: created.title,
           cjPid: best.id,
           cjSku: best.sku,
-          cogs: parseFloat(best.sellPrice),
+          cogs: cj.parseCJPrice(best.sellPrice),
           retailPrice: parseFloat(created.variants?.[0]?.price),
           replacedProductId: candidate.replacesProductId || null,
         });

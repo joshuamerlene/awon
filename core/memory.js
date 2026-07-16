@@ -40,13 +40,49 @@ const DEFAULT_MEMORY = {
   updatedAt: null,
 };
 
+// Stale-belief scrub. During the weeks the integrations were broken, Awon
+// locked in a set of "learnings" that are now false and actively harmful:
+// that TikTok access is unverified, that Josh's manual execution is the
+// permanent blocker, that the right move is escalation deadlines aimed at
+// Josh instead of doing the work. Those beliefs survived the integration
+// fixes and steered every cycle's strategy away from producing anything.
+// Filter them on EVERY load so re-learned variants get caught too.
+const STALE_BELIEF_PATTERNS = [
+  /permanent(ly)?\s+block/i,
+  /blocking dependency/i,
+  /unverified\b.{0,40}(tiktok|account|access)/i,
+  /(tiktok|account|access).{0,40}\bunverified/i,
+  /escalat(e|es|ion)/i,
+  /binary decision gate/i,
+  /exclusive, permanent control/i,
+  /josh'?s human execution/i,
+  /deadline (threat|forces)/i,
+  /delegation model/i,
+  /content agent ran \(false\)/i,
+];
+
+function scrubStaleBeliefs(memory) {
+  if (Array.isArray(memory.learnings)) {
+    memory.learnings = memory.learnings.filter((l) => {
+      const text = typeof l === "string" ? l : (l && l.insight) || "";
+      return !STALE_BELIEF_PATTERNS.some((rx) => rx.test(text));
+    });
+  }
+  if (Array.isArray(memory.nextActions)) {
+    memory.nextActions = memory.nextActions.filter(
+      (a) => !STALE_BELIEF_PATTERNS.some((rx) => rx.test(String(a)))
+    );
+  }
+  return memory;
+}
+
 export function loadMemory() {
   if (!fs.existsSync(MEMORY_PATH)) {
     fs.mkdirSync(path.dirname(MEMORY_PATH), { recursive: true });
     fs.writeFileSync(MEMORY_PATH, JSON.stringify(DEFAULT_MEMORY, null, 2));
     return { ...DEFAULT_MEMORY };
   }
-  return JSON.parse(fs.readFileSync(MEMORY_PATH, "utf-8"));
+  return scrubStaleBeliefs(JSON.parse(fs.readFileSync(MEMORY_PATH, "utf-8")));
 }
 
 export function saveMemory(memory) {
@@ -56,6 +92,8 @@ export function saveMemory(memory) {
 }
 
 export function addLearning(memory, learning) {
+  // Refuse to re-learn a scrubbed stale belief (see STALE_BELIEF_PATTERNS).
+  if (STALE_BELIEF_PATTERNS.some((rx) => rx.test(String(learning)))) return;
   memory.learnings.unshift({
     date: new Date().toISOString(),
     insight: learning,

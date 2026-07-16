@@ -85,6 +85,18 @@ Describe in plain text what you will do now to continue this thread, given his i
     log("system", `TikTok data skipped (not yet wired): ${err.message}`);
   }
 
+  // Raw footage is the content pipeline's real input — surface it to the
+  // strategy decision. Without this, Awon had no way to know clips existed
+  // and kept ruling the content agent off cycle after cycle.
+  let rawFootage = [];
+  try {
+    rawFootage = video.listRawFootage();
+  } catch { /* non-fatal */ }
+  const unusedFootageCount = rawFootage.filter(f => !(memory.usedFootage || []).includes(f.filename)).length;
+  if (rawFootage.length > 0) {
+    log("action", `Raw footage: ${rawFootage.length} clip(s) uploaded, ${unusedFootageCount} not yet used`);
+  }
+
   // ── 3. Strategic decision — what does Awon focus on this cycle? ───────────
   // Store agent runs weekly (every 7th cycle) — visual changes shouldn't be constant
   const cycleCount = (memory.cycleCount || 0) + 1;
@@ -103,6 +115,8 @@ Current data:
 - Products in catalog: ${products.length} (if 0, catalog was intentionally cleared — your job is to rebuild it via Printful POD)
 - Recent orders (24h): ${orders.length}
 - TikTok videos available: ${videos.length}
+- Raw footage clips Josh has uploaded for you to edit: ${rawFootage.length} total, ${unusedFootageCount} not yet used
+- TikTok posting reality check: the Content Posting API WORKS. Because the app is Sandbox/unaudited, every post lands as PRIVATE (SELF_ONLY) and Josh manually flips it public in the TikTok app — that manual flip is the agreed, accepted workflow, NOT a blocker and NOT unverified access. A private post with a publish ID IS a delivered post and counts as your proof artifact. If unused raw footage exists, running the content agent produces and publishes a real post this cycle. Do not rule the content agent off because of "unverified account access" — that belief is outdated.
 - Budget available: $${ledger.getAvailable().toFixed(2)}
 - Ad cap: $${ledger.getAdCap().toFixed(2)}
 - Pending blockers (don't act on these, just know they exist): ${pendingBlockers.map(b => b.title).join(", ") || "none"}
@@ -124,6 +138,15 @@ Return JSON:
   } catch (err) {
     log("error", `Strategy decision failed: ${err.message}`);
     strategy = { focus: "Review available data", runProductAgent: true, runContentAgent: true, runAnalyticsAgent: false };
+  }
+
+  // Deterministic override: if unused footage exists, the content agent RUNS.
+  // The strategy model repeatedly ruled content off based on stale memory
+  // ("unverified access", "Josh is the blocker") cycle after cycle — so this
+  // is no longer its call to make. Producing content is the job.
+  if (unusedFootageCount > 0 && !strategy.runContentAgent) {
+    log("decision", `Override: strategy skipped the content agent despite ${unusedFootageCount} unused clip(s) — running it anyway. Content production is not optional while footage exists.`);
+    strategy.runContentAgent = true;
   }
 
   // Update strategy in memory
@@ -200,25 +223,11 @@ Reply to Josh directly, in 1-3 sentences, plain text. Tell him what you're actua
   }
 
   // ── 5. Execute catalog actions ─────────────────────────────────────────────
+  // NOTE: reprices and kills are executed by the product agent itself
+  // (agents/product.js steps 4–5). They used to ALSO be re-executed here,
+  // so every reprice and archive ran twice per cycle (visible as duplicate
+  // "Repriced …" / "Archived …" pairs in the activity log). Removed.
   if (productRecs) {
-    for (const reprice of productRecs.repriceSuggestions || []) {
-      try {
-        await shopify.updateProduct(reprice.productId, { variants: [{ price: String(reprice.newPrice) }] });
-        log("action", `Repriced product ${reprice.productId} → $${reprice.newPrice}: ${reprice.reasoning}`);
-      } catch (err) {
-        log("error", `Reprice failed (${reprice.productId}): ${err.message}`);
-      }
-    }
-
-    for (const id of productRecs.kill || []) {
-      try {
-        await shopify.archiveProduct(id);
-        log("action", `Archived underperforming product ${id}`);
-      } catch (err) {
-        log("error", `Archive failed (${id}): ${err.message}`);
-      }
-    }
-
     // Log POD products that were created this cycle
     if ((productRecs.createdPODProducts || []).length > 0) {
       log("action", `POD products created this cycle: ${productRecs.createdPODProducts.map(p => `"${p.title}"`).join(", ")}`);

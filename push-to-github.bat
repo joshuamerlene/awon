@@ -26,7 +26,18 @@ IF "%GITHUB_PAT%"=="" (
 %GIT% remote remove origin 2>nul
 %GIT% remote add origin https://%GITHUB_PAT%@github.com/joshuamerlene/awon.git
 %GIT% branch -M main
+
+REM GitHub may be ahead of this machine (a Jul 12 commit was pushed that this
+REM clone never pulled — plain push gets rejected and the deploy silently dies).
+REM Merge the remote in first; on any overlap, THIS machine's files win.
+%GIT% fetch origin main
+%GIT% merge -X ours origin/main -m "Merge remote main - local files take precedence"
+
 %GIT% push -u origin main
+IF ERRORLEVEL 1 (
+  echo.
+  echo *** PUSH FAILED — Railway will NOT deploy. Read the error above. ***
+)
 SET GITHUB_PAT=
 
 echo.
