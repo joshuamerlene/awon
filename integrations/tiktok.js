@@ -158,6 +158,23 @@ export async function getAccountVideos() {
 }
 
 /**
+ * TikTok's upload init is strict about chunking ("The chunk size is invalid",
+ * seen live 2026-07-16 with a hardcoded chunk_size of 10MB on ~2MB clips):
+ * for a single-chunk upload, chunk_size must EQUAL video_size. Single chunk
+ * is allowed up to 64MB, which covers every clip this pipeline produces
+ * (edited posts are 6-30s, a few MB). Anything bigger is refused loudly
+ * rather than guessing at multi-chunk math we can't test.
+ */
+function buildFileUploadSourceInfo(videoPath) {
+  const size = fs.statSync(videoPath).size;
+  const MAX_SINGLE_CHUNK = 64 * 1024 * 1024;
+  if (size > MAX_SINGLE_CHUNK) {
+    throw new Error(`Video is ${(size / 1048576).toFixed(1)}MB — over TikTok's 64MB single-chunk limit. Produce shorter clips.`);
+  }
+  return { source: "FILE_UPLOAD", video_size: size, chunk_size: size, total_chunk_count: 1 };
+}
+
+/**
  * Publish a video to TikTok.
  * Supports two modes:
  *   - videoPath: upload a local file (for agent-created/edited videos)
@@ -196,7 +213,7 @@ export async function publishVideo({ videoPath, videoUrl, caption, hashtags = []
       },
       source_info: videoUrl
         ? { source: "PULL_FROM_URL", video_url: videoUrl }
-        : { source: "FILE_UPLOAD", video_size: fs.statSync(videoPath).size, chunk_size: 10000000, total_chunk_count: 1 },
+        : buildFileUploadSourceInfo(videoPath),
     }),
   });
 
