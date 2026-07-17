@@ -116,7 +116,8 @@ Current data:
 - Recent orders (24h): ${orders.length}
 - TikTok videos available: ${videos.length}
 - Raw footage clips Josh has uploaded for you to edit: ${rawFootage.length} total, ${unusedFootageCount} not yet used
-- TikTok posting reality check: the Content Posting API WORKS. Because the app is Sandbox/unaudited, every post lands as PRIVATE (SELF_ONLY) and Josh manually flips it public in the TikTok app — that manual flip is the agreed, accepted workflow, NOT a blocker and NOT unverified access. A private post with a publish ID IS a delivered post and counts as your proof artifact. If unused raw footage exists, running the content agent produces and publishes a real post this cycle. Do not rule the content agent off because of "unverified account access" — that belief is outdated.
+- TikTok posting reality check: the Content Posting API WORKS. Because the app is Sandbox/unaudited, every post lands as PRIVATE (SELF_ONLY). A private post with a publish ID IS a delivered post and counts as your proof artifact — your job ends at delivery.
+- THE RELEASE SCHEDULE (understand this so you never ask about it again): Josh releases your private posts to the public on HIS OWN schedule, usually in batches — that's the agreed operating rhythm while the app awaits TikTok's audit. Posts "banked" and not yet public are NORMAL and EXPECTED, not a problem, not a blocker, not something to remind him about, and never a reason to slow production. Your responsibility is a steady stream of quality posts stacking up ready for release: ${(memory.pendingFlips || []).length} currently banked. Keep producing every cycle that footage allows. An audit application is in progress to remove the private-only restriction entirely.
 - Budget available: $${ledger.getAvailable().toFixed(2)}
 - Ad cap: $${ledger.getAdCap().toFixed(2)}
 - Pending blockers (don't act on these, just know they exist): ${pendingBlockers.map(b => b.title).join(", ") || "none"}
@@ -263,13 +264,15 @@ Reply to Josh directly, in 1-3 sentences, plain text. Tell him what you're actua
       try {
         const { publishId, privacyLevel } = await tiktok.publishVideo(post);
         if (privacyLevel === "SELF_ONLY") {
-          log("action", `Posted to TikTok privately (unaudited app — awaiting manual publish): "${post.caption?.slice(0, 60)}..." (${publishId})`);
-          addBlocker({
-            title: "TikTok video posted privately — needs manual publish",
-            context: `Posted "${post.caption?.slice(0, 80)}..." to @the.rival.is.me (from footage "${post.sourceFootageFilename || "unknown"}"), but the app is unaudited so TikTok forces it private (SELF_ONLY). Open the TikTok app, find this draft, and change its privacy to "Everyone" to make it public. Publish ID: ${publishId}`,
-            options: ["I've made it public", "Skip this one"],
-            thread: "Once you confirm, I'll move on — I can't flip the privacy setting myself, TikTok only allows that from within the app.",
-          });
+          // Deliberate workflow — NOT a blocker: posts land private, Josh
+          // releases them on HIS schedule (often in batches). Do not nag him
+          // per video; keep a quiet running list in memory instead, and keep
+          // producing regardless of how many are still unflipped.
+          log("action", `Posted to TikTok privately: "${post.caption?.slice(0, 60)}..." (${publishId}) — banked for Josh's next release batch.`);
+          memory.pendingFlips = [
+            ...(memory.pendingFlips || []),
+            { publishId, caption: post.caption?.slice(0, 80), postedAt: new Date().toISOString() },
+          ].slice(-30);
         } else {
           log("action", `Published TikTok: "${post.caption?.slice(0, 60)}..." (${publishId})`);
         }

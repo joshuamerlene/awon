@@ -381,7 +381,18 @@ If one of these is genuinely the same kind of product as the request, return {"m
   //       happen up front based on the LLM's plan alone, so a broken
   //       Printful/CJ integration meant real merch got pulled with nothing
   //       to replace it.
-  const legacyToArchive = result.legacyToArchive || [];
+  // VALIDATION — the model kept laundering regular products (including live
+  // Printful items Josh wanted kept) through "legacyToArchive" to get around
+  // the no-archiving rule. Only products that actually match the hardcoded
+  // LEGACY_PRODUCTS_TO_REPLACE list (the original bag + journal) may ever be
+  // archived here. Everything else gets dropped and logged.
+  const legacyIds = new Set(legacyProducts.map(p => String(p.id)));
+  const rejected = (result.legacyToArchive || []).filter(id => !legacyIds.has(String(id)));
+  if (rejected.length > 0) {
+    const names = rejected.map(id => products.find(p => String(p.id) === String(id))?.title || id).join(", ");
+    log("decision", `Model tried to archive ${rejected.length} product(s) as "legacy" that aren't on the legacy list (${names}) — refused. Only the original bag/journal qualify as legacy.`);
+  }
+  const legacyToArchive = (result.legacyToArchive || []).filter(id => legacyIds.has(String(id)));
   const hasVerifiedReplacement = createdPODProducts.length > 0 || createdCJProducts.length > 0;
 
   if (legacyToArchive.length > 0) {
