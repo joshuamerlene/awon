@@ -36,6 +36,13 @@
   .error { margin-top:10px; font-size:13px; color:var(--danger); }
   .empty { color:var(--dim); padding:40px 0; text-align:center; }
   .backlink { color:var(--dim); font-size:13px; text-decoration:none; }
+  .dd { position:relative; }
+  .dd-btn { width:100%; text-align:left; background:#0e0e0e; color:var(--dim); border:1px solid var(--line); border-radius:6px; padding:10px; font-size:14px; font-weight:400; cursor:pointer; }
+  .dd-btn.chosen { color:var(--text); }
+  .dd-btn::after { content:'▾'; float:right; color:var(--dim); }
+  .dd-list { position:absolute; top:calc(100% + 4px); left:0; right:0; background:#0e0e0e; border:1px solid var(--line); border-radius:6px; z-index:5; overflow:hidden; }
+  .dd-item { padding:11px 12px; font-size:14px; cursor:pointer; }
+  .dd-item:hover { background:#1e1e1e; }
 </style>
 </head>
 <body>
@@ -88,15 +95,18 @@ function renderCard(item) {
   const card = document.createElement('div');
   card.className = 'card';
 
-  const privacyOpts = (CREATOR.privacyLevelOptions || []).map(o =>
-    '<option value="' + o + '">' + (PRIVACY_LABELS[o] || o) + '</option>').join('');
+  // Custom DOM dropdown (not a native <select>): renders identically for
+  // every user and keeps the whole flow in-page. Per TikTok guidelines it
+  // has NO default value — the user must pick explicitly.
+  const privacyItems = (CREATOR.privacyLevelOptions || []).map(o =>
+    '<div class="dd-item" data-value="' + o + '">' + (PRIVACY_LABELS[o] || o) + '</div>').join('');
 
   card.innerHTML =
     '<video controls preload="metadata" src="/api/review/' + item.id + '/video?token=' + encodeURIComponent(token) + '"></video>' +
     '<label>Title / caption (editable)</label>' +
     '<textarea class="title"></textarea>' +
     '<label>Who can view this video</label>' +
-    '<select class="privacy"><option value="" disabled selected>Select privacy status…</option>' + privacyOpts + '</select>' +
+    '<div class="dd"><button type="button" class="dd-btn">Select privacy status…</button><div class="dd-list" style="display:none;">' + privacyItems + '</div></div>' +
     '<label>Allow users to</label>' +
     '<div class="row">' +
       '<span class="chk' + (CREATOR.commentDisabled ? ' disabled' : '') + '"><input type="checkbox" class="allowComment"' + (CREATOR.commentDisabled ? ' disabled' : '') + '> Comment</span>' +
@@ -124,9 +134,23 @@ function renderCard(item) {
   const q = s => card.querySelector(s);
   q('.title').value = item.caption + (item.hashtags && item.hashtags.length ? ' ' + item.hashtags.map(h => '#' + String(h).replace(/^#/, '')).join(' ') : '');
 
+  card._privacy = '';
+  q('.dd-btn').addEventListener('click', () => {
+    const l = q('.dd-list');
+    l.style.display = l.style.display === 'none' ? 'block' : 'none';
+  });
+  card.querySelectorAll('.dd-item').forEach(el => el.addEventListener('click', () => {
+    card._privacy = el.dataset.value;
+    const btn = q('.dd-btn');
+    btn.textContent = el.textContent;
+    btn.classList.add('chosen');
+    q('.dd-list').style.display = 'none';
+    validate();
+  }));
+
   const state = () => ({
     title: q('.title').value,
-    privacyLevel: q('.privacy').value,
+    privacyLevel: card._privacy,
     allowComment: q('.allowComment').checked,
     allowDuet: q('.allowDuet').checked,
     allowStitch: q('.allowStitch').checked,
