@@ -61,6 +61,12 @@ const STALE_BELIEF_PATTERNS = [
   /content agent ran \(false\)/i,
   /commitment gate/i,
   /assumes? exclusive/i,
+  /operator[- ]exclusive/i,
+  /account access protocol/i,
+  /if josh does not respond/i,
+  /irreversibl/i,
+  /recovery protocol within/i,
+  /proof artifacts? by/i,
 ];
 
 function scrubStaleBeliefs(memory) {
