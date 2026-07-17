@@ -110,6 +110,19 @@ function contentReady() {
   return !!(process.env.TIKTOK_CONTENT_ACCESS_TOKEN || fs.existsSync(TOKEN_PATH));
 }
 
+/**
+ * Store tokens from a fresh OAuth grant (called by the /auth/tiktok/callback
+ * route). Persists to the volume-backed token file that getAccessToken()
+ * reads and auto-refreshes — no manual env-var step, no tokens on screen.
+ */
+export function storeOAuthTokens({ accessToken, refreshToken, expiresIn }) {
+  saveTokenState({
+    accessToken,
+    refreshToken: refreshToken || null,
+    expiresAt: Date.now() + (Number(expiresIn || 86400) - 3600) * 1000, // refresh 1h early
+  });
+}
+
 // ─── TikTok Shop API ──────────────────────────────────────────────────────────
 
 /**

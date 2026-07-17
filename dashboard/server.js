@@ -374,13 +374,26 @@ export function startDashboard() {
       const tokenData = await tokenRes.json();
 
       if (tokenData.access_token) {
+        // Persist tokens server-side (volume-backed, auto-refreshing).
+        // NEVER render tokens in the browser — they were previously shown on
+        // this page in plaintext, which is a credential leak (and an instant
+        // problem in any screen recording, e.g. the TikTok audit demo video).
+        tiktok.storeOAuthTokens({
+          accessToken: tokenData.access_token,
+          refreshToken: tokenData.refresh_token,
+          expiresIn: tokenData.expires_in,
+        });
+        log("system", `TikTok reconnected via OAuth — scopes: ${tokenData.scope}`);
         res.send(
-          `<h1>✅ TikTok Connected!</h1>` +
-          `<p><b>Access Token:</b> <code style="word-break:break-all">${tokenData.access_token}</code></p>` +
-          `<p><b>Refresh Token:</b> <code style="word-break:break-all">${tokenData.refresh_token}</code></p>` +
-          `<p><b>Expires in:</b> ${tokenData.expires_in}s &nbsp; <b>Scope:</b> ${tokenData.scope}</p>` +
-          `<p>Add <code>TIKTOK_CONTENT_ACCESS_TOKEN=${tokenData.access_token}</code> (and ideally <code>TIKTOK_CONTENT_REFRESH_TOKEN=${tokenData.refresh_token}</code>) to Railway environment variables.</p>` +
-          `<p style="color:#b45309">Note: this app is unaudited, so videos Awon posts will land as private (Only You) until you manually flip each one to public in the TikTok app. Check the dashboard's "Needs Your Input" section after each post.</p>`
+          `<!DOCTYPE html><html><head><meta charset="utf-8"><title>TikTok Connected · AWON</title>` +
+          `<style>body{background:#080808;color:#e8e8e8;font-family:'Segoe UI',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:90vh}` +
+          `.card{background:#141414;border:1px solid #262626;border-radius:10px;padding:36px 44px;text-align:center;max-width:440px}` +
+          `h1{font-size:22px;letter-spacing:1px;margin:0 0 10px}.ok{color:#c8f542;font-size:40px}p{color:#9a9a9a;font-size:14px;line-height:1.6}` +
+          `a{display:inline-block;margin-top:18px;background:#c8f542;color:#000;text-decoration:none;font-weight:600;padding:10px 24px;border-radius:6px}</style></head>` +
+          `<body><div class="card"><div class="ok">✓</div><h1>TIKTOK CONNECTED</h1>` +
+          `<p>Awon is authorized to post to this TikTok account. Credentials are stored securely server-side and refresh automatically.</p>` +
+          `<p>Scopes granted: ${tokenData.scope}</p>` +
+          `<a href="/">Back to dashboard</a></div></body></html>`
         );
       } else {
         res.send(`<h1>Token Exchange Error</h1><pre>${JSON.stringify(tokenData, null, 2)}</pre>`);
