@@ -18,6 +18,7 @@ import { Ledger } from "./ledger.js";
 import { loadMemory, saveMemory, addLearning } from "./memory.js";
 import { getPendingBlockers, getResolvedBlockers, markProcessed, addBlocker, addBlockerOnce } from "./queue.js";
 import { getUnconsumedNotes, markConsumed as markNoteConsumed } from "./notes.js";
+import * as reviewQueue from "./reviewQueue.js";
 import { log } from "./logger.js";
 import { runProductAgent } from "../agents/product.js";
 import { runContentAgent } from "../agents/content.js";
@@ -261,6 +262,20 @@ Reply to Josh directly, in 1-3 sentences, plain text. Tell him what you're actua
   // ── 6. Execute content actions ─────────────────────────────────────────────
   if (contentPlan) {
     for (const post of contentPlan.postsToPublish || []) {
+      // Review mode (TIKTOK_REVIEW_MODE=true): finished videos wait on the
+      // dashboard's /review.html compose page for Josh's explicit metadata +
+      // consent, per TikTok's Direct Post UX guidelines. The video file is
+      // NOT cleaned up — the review page needs it until posted/discarded.
+      if (reviewQueue.isReviewMode()) {
+        const item = reviewQueue.addToReviewQueue({
+          videoPath: post.videoPath,
+          caption: post.caption,
+          hashtags: post.hashtags,
+          sourceFootageFilename: post.sourceFootageFilename,
+        });
+        log("action", `Queued post for Josh's review (review mode): "${post.caption?.slice(0, 60)}..." — waiting at /review.html (${item.id})`);
+        continue;
+      }
       try {
         const { publishId, privacyLevel } = await tiktok.publishVideo(post);
         if (privacyLevel === "SELF_ONLY") {

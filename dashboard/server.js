@@ -26,12 +26,14 @@ import multer from "multer";
 import unzipper from "unzipper";
 import { getAllBlockers, resolveBlocker, getPendingBlockers } from "../core/queue.js";
 import { addNote, getAllNotes } from "../core/notes.js";
-import { getLog } from "../core/logger.js";
+import { getLog, log } from "../core/logger.js";
 import { loadMemory } from "../core/memory.js";
 import { Ledger } from "../core/ledger.js";
 import { getContentQueue } from "../agents/content.js";
 import * as shopify from "../integrations/shopify.js";
 import * as video from "../integrations/video.js";
+import * as tiktok from "../integrations/tiktok.js";
+import { getReviewQueue, getReviewItem, updateReviewItem, isReviewMode } from "../core/reviewQueue.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -242,6 +244,76 @@ export function startDashboard() {
       const status = req.query.status; // filter by ?status=pending|posted
       const items = status ? queue.filter(i => i.status === status) : queue;
       res.json({ total: items.length, items: items.reverse() }); // newest first
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── TikTok Review Queue (audit-compliant compose flow, /review.html) ──────
+  app.get("/api/review", async (req, res) => {
+    try {
+      const items = getReviewQueue().filter(i => i.status === "pending");
+      let creator = null, creatorError = null;
+      try { creator = await tiktok.getCreatorInfo(); } catch (err) { creatorError = err.message; }
+      res.json({ reviewMode: isReviewMode(), items, creator, creatorError });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Stream a queued video for preview
+  app.get("/api/review/:id/video", (req, res) => {
+    const item = getReviewItem(req.params.id);
+    if (!item || !fs.existsSync(item.videoPath)) return res.status(404).json({ error: "Not found" });
+    res.sendFile(path.resolve(item.videoPath));
+  });
+
+  // Publish with user-selected metadata (title, privacy, interactions, disclosure)
+  app.post("/api/review/:id/publish", async (req, res) => {
+    try {
+      const item = getReviewItem(req.params.id);
+      if (!item || item.status !== "pending") return res.status(404).json({ error: "Not found or already handled" });
+
+      const { title, privacyLevel, allowComment, allowDuet, allowStitch, brandOrganic, brandedContent } = req.body || {};
+      if (!privacyLevel) return res.status(400).json({ error: "Select a privacy status first — TikTok requires an explicit choice." });
+      if (brandedContent && privacyLevel === "SELF_ONLY") {
+        return res.status(400).json({ error: "Branded content visibility cannot be set to private." });
+      }
+
+      const { publishId, privacyLevel: applied } = await tiktok.publishVideo({
+        videoPath: item.videoPath,
+        caption: title != null && String(title).trim() ? String(title).trim() : item.caption,
+        hashtags: [], // hashtags are already part of the edited caption/title shown to the user
+        privacyLevel,
+        allowComment: !!allowComment,
+        allowDuet: !!allowDuet,
+        allowStitch: !!allowStitch,
+        brandOrganic: !!brandOrganic,
+        brandedContent: !!brandedContent,
+      });
+
+      updateReviewItem(item.id, { status: "posted", publishId, postedAt: new Date().toISOString() });
+      video.cleanupEditedClip(item.videoPath);
+      log("action", `Josh reviewed and posted "${(title || item.caption || "").slice(0, 60)}..." via the review page (${publishId}, ${applied}).`);
+      res.json({ success: true, publishId, privacyLevel: applied });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/review/:id/discard", (req, res) => {
+    const item = getReviewItem(req.params.id);
+    if (!item || item.status !== "pending") return res.status(404).json({ error: "Not found or already handled" });
+    updateReviewItem(item.id, { status: "discarded", discardedAt: new Date().toISOString() });
+    video.cleanupEditedClip(item.videoPath);
+    log("action", `Josh discarded review-queue post "${(item.caption || "").slice(0, 60)}..."`);
+    res.json({ success: true });
+  });
+
+  // Post-processing status (publish/status/fetch) so the UI can show progress
+  app.get("/api/review/status/:publishId", async (req, res) => {
+    try {
+      res.json(await tiktok.getPublishStatus(req.params.publishId));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

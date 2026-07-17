@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review &amp; Post · AWON · The Rival Is Me</title>
+<style>
+  :root { --bg:#080808; --panel:#141414; --line:#262626; --text:#e8e8e8; --dim:#9a9a9a; --accent:#c8f542; --danger:#f54242; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; padding:24px; max-width:860px; margin:0 auto; }
+  h1 { font-size:20px; letter-spacing:2px; margin-bottom:4px; }
+  .sub { color:var(--dim); font-size:13px; margin-bottom:20px; }
+  .creator { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 16px; margin-bottom:20px; display:flex; align-items:center; gap:12px; }
+  .creator img { width:36px; height:36px; border-radius:50%; }
+  .creator b { color:var(--accent); }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; margin-bottom:24px; }
+  video { width:100%; max-height:420px; background:#000; border-radius:6px; margin-bottom:12px; }
+  label { display:block; font-size:12px; color:var(--dim); text-transform:uppercase; letter-spacing:1px; margin:14px 0 6px; }
+  textarea, select { width:100%; background:#0e0e0e; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:10px; font-size:14px; font-family:inherit; }
+  textarea { min-height:70px; resize:vertical; }
+  .row { display:flex; gap:18px; flex-wrap:wrap; align-items:center; }
+  .chk { display:flex; align-items:center; gap:7px; font-size:14px; }
+  .chk input { width:16px; height:16px; accent-color:var(--accent); }
+  .chk.disabled { opacity:.4; }
+  .toggle-block { border:1px solid var(--line); border-radius:6px; padding:12px; margin-top:14px; }
+  .hint { font-size:12px; color:var(--dim); margin-top:6px; }
+  .warn { font-size:12px; color:#f5c542; margin-top:6px; }
+  .declaration { font-size:12px; color:var(--dim); margin:16px 0 10px; }
+  .declaration a { color:var(--accent); }
+  .btns { display:flex; gap:10px; }
+  button { border:0; border-radius:6px; padding:11px 22px; font-size:14px; font-weight:600; cursor:pointer; }
+  .post { background:var(--accent); color:#000; }
+  .post:disabled { background:#3a3a3a; color:#777; cursor:not-allowed; }
+  .discard { background:transparent; color:var(--danger); border:1px solid var(--danger); }
+  .status { margin-top:10px; font-size:13px; color:var(--accent); }
+  .error { margin-top:10px; font-size:13px; color:var(--danger); }
+  .empty { color:var(--dim); padding:40px 0; text-align:center; }
+  .backlink { color:var(--dim); font-size:13px; text-decoration:none; }
+</style>
+</head>
+<body>
+  <a class="backlink" href="/">&larr; Back to dashboard</a>
+  <h1>REVIEW &amp; POST TO TIKTOK</h1>
+  <div class="sub">Awon prepared these posts. Review, set your options, and post — nothing is sent to TikTok until you hit Post.</div>
+  <div id="creator" class="creator" style="display:none"></div>
+  <div id="queue"></div>
+
+<script>
+const token = localStorage.getItem('awon_token') || prompt('Dashboard password:');
+localStorage.setItem('awon_token', token);
+const api = (p, opts) => fetch(p + (p.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token), opts).then(r => r.json());
+
+const PRIVACY_LABELS = {
+  PUBLIC_TO_EVERYONE: 'Everyone',
+  MUTUAL_FOLLOW_FRIENDS: 'Friends',
+  FOLLOWER_OF_CREATOR: 'Followers',
+  SELF_ONLY: 'Only me',
+};
+
+let CREATOR = null;
+
+async function load() {
+  const data = await api('/api/review');
+  const creatorEl = document.getElementById('creator');
+  const queueEl = document.getElementById('queue');
+
+  if (data.creatorError) {
+    creatorEl.style.display = 'block';
+    creatorEl.innerHTML = '<span class="error">TikTok account unavailable: ' + data.creatorError + '</span>';
+    queueEl.innerHTML = '<div class="empty">Connect TikTok first, then reload.</div>';
+    return;
+  }
+  CREATOR = data.creator;
+  creatorEl.style.display = 'flex';
+  creatorEl.innerHTML = (CREATOR.avatarUrl ? '<img src="' + CREATOR.avatarUrl + '">' : '') +
+    '<div>Posting to <b>' + (CREATOR.nickname || CREATOR.username || 'TikTok account') + '</b>' +
+    (CREATOR.maxVideoPostDurationSec ? '<div class="hint">Max video length: ' + CREATOR.maxVideoPostDurationSec + 's</div>' : '') + '</div>';
+
+  if (!data.items.length) {
+    queueEl.innerHTML = '<div class="empty">No posts waiting for review. Awon adds new ones each cycle.</div>';
+    return;
+  }
+  queueEl.innerHTML = '';
+  data.items.forEach(item => queueEl.appendChild(renderCard(item)));
+}
+
+function renderCard(item) {
+  const card = document.createElement('div');
+  card.className = 'card';
+
+  const privacyOpts = (CREATOR.privacyLevelOptions || []).map(o =>
+    '<option value="' + o + '">' + (PRIVACY_LABELS[o] || o) + '</option>').join('');
+
+  card.innerHTML =
+    '<video controls preload="metadata" src="/api/review/' + item.id + '/video?token=' + encodeURIComponent(token) + '"></video>' +
+    '<label>Title / caption (editable)</label>' +
+    '<textarea class="title"></textarea>' +
+    '<label>Who can view this video</label>' +
+    '<select class="privacy"><option value="" disabled selected>Select privacy status…</option>' + privacyOpts + '</select>' +
+    '<label>Allow users to</label>' +
+    '<div class="row">' +
+      '<span class="chk' + (CREATOR.commentDisabled ? ' disabled' : '') + '"><input type="checkbox" class="allowComment"' + (CREATOR.commentDisabled ? ' disabled' : '') + '> Comment</span>' +
+      '<span class="chk' + (CREATOR.duetDisabled ? ' disabled' : '') + '"><input type="checkbox" class="allowDuet"' + (CREATOR.duetDisabled ? ' disabled' : '') + '> Duet</span>' +
+      '<span class="chk' + (CREATOR.stitchDisabled ? ' disabled' : '') + '"><input type="checkbox" class="allowStitch"' + (CREATOR.stitchDisabled ? ' disabled' : '') + '> Stitch</span>' +
+    '</div>' +
+    '<div class="toggle-block">' +
+      '<span class="chk"><input type="checkbox" class="disclose"> Disclose commercial content</span>' +
+      '<div class="hint">Indicate whether this content promotes yourself, a brand, product or service.</div>' +
+      '<div class="disclose-opts" style="display:none; margin-top:10px;">' +
+        '<span class="chk"><input type="checkbox" class="yourBrand"> Your brand</span>' +
+        '<span class="chk" style="margin-top:6px;"><input type="checkbox" class="brandedContent"> Branded content</span>' +
+        '<div class="warn discloseNote" style="display:none;"></div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="declaration">By posting, you agree to TikTok\'s <span class="decl-links"><a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank">Music Usage Confirmation</a></span>.</div>' +
+    '<div class="btns">' +
+      '<button class="post" disabled>Post</button>' +
+      '<button class="discard">Discard</button>' +
+    '</div>' +
+    '<div class="hint">After posting, it may take a few minutes for the video to process and appear on the profile.</div>' +
+    '<div class="status" style="display:none;"></div>' +
+    '<div class="error" style="display:none;"></div>';
+
+  const q = s => card.querySelector(s);
+  q('.title').value = item.caption + (item.hashtags && item.hashtags.length ? ' ' + item.hashtags.map(h => '#' + String(h).replace(/^#/, '')).join(' ') : '');
+
+  const state = () => ({
+    title: q('.title').value,
+    privacyLevel: q('.privacy').value,
+    allowComment: q('.allowComment').checked,
+    allowDuet: q('.allowDuet').checked,
+    allowStitch: q('.allowStitch').checked,
+    disclose: q('.disclose').checked,
+    brandOrganic: q('.yourBrand').checked,
+    brandedContent: q('.brandedContent').checked,
+  });
+
+  function validate() {
+    const s = state();
+    let ok = !!s.privacyLevel;
+    let note = '';
+
+    if (s.disclose) {
+      if (!s.brandOrganic && !s.brandedContent) {
+        ok = false;
+        note = 'You need to indicate if your content promotes yourself, a third party, or both.';
+      } else if (s.brandedContent) {
+        if (s.privacyLevel === 'SELF_ONLY') { ok = false; note = 'Branded content visibility cannot be set to private.'; }
+        else note = "Your video will be labeled as 'Paid partnership'.";
+      } else if (s.brandOrganic) {
+        note = "Your video will be labeled as 'Promotional content'.";
+      }
+    }
+    // video duration vs creator max
+    const v = q('video');
+    if (CREATOR.maxVideoPostDurationSec && v.duration && v.duration > CREATOR.maxVideoPostDurationSec) {
+      ok = false; note = 'Video is longer than this account\'s ' + CREATOR.maxVideoPostDurationSec + 's limit.';
+    }
+
+    const noteEl = q('.discloseNote');
+    noteEl.style.display = note ? 'block' : 'none';
+    noteEl.textContent = note;
+
+    // Declaration links per guidelines
+    const decl = q('.decl-links');
+    if (s.disclose && s.brandedContent) {
+      decl.innerHTML = '<a href="https://www.tiktok.com/legal/page/global/bc-policy/en" target="_blank">Branded Content Policy</a> and <a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank">Music Usage Confirmation</a>';
+    } else {
+      decl.innerHTML = '<a href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en" target="_blank">Music Usage Confirmation</a>';
+    }
+
+    q('.post').disabled = !ok;
+  }
+
+  card.addEventListener('change', () => {
+    q('.disclose-opts').style.display = q('.disclose').checked ? 'block' : 'none';
+    validate();
+  });
+  q('video').addEventListener('loadedmetadata', validate);
+  q('.title').addEventListener('input', validate);
+
+  q('.post').addEventListener('click', async () => {
+    const s = state();
+    q('.post').disabled = true;
+    q('.error').style.display = 'none';
+    const res = await api('/api/review/' + item.id + '/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(s),
+    });
+    if (res.error) {
+      q('.error').style.display = 'block';
+      q('.error').textContent = res.error;
+      q('.post').disabled = false;
+      return;
+    }
+    q('.status').style.display = 'block';
+    q('.status').textContent = 'Posted (' + res.publishId + '). Processing — this can take a few minutes…';
+    pollStatus(res.publishId, q('.status'));
+    card.querySelectorAll('button, select, textarea, input').forEach(el => el.disabled = true);
+  });
+
+  q('.discard').addEventListener('click', async () => {
+    await api('/api/review/' + item.id + '/discard', { method: 'POST' });
+    card.remove();
+  });
+
+  return card;
+}
+
+async function pollStatus(publishId, el) {
+  for (let i = 0; i < 12; i++) {
+    await new Promise(r => setTimeout(r, 10000));
+    try {
+      const s = await api('/api/review/status/' + encodeURIComponent(publishId));
+      if (s.status) el.textContent = 'Status: ' + s.status + (s.publicaly_available_post_id ? ' — live on profile' : '');
+      if (['PUBLISH_COMPLETE', 'FAILED'].includes(s.status)) break;
+    } catch { break; }
+  }
+}
+
+load();
+</script>
+</body>
+</html>

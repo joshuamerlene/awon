@@ -180,7 +180,58 @@ function buildFileUploadSourceInfo(videoPath) {
  *   - videoPath: upload a local file (for agent-created/edited videos)
  *   - videoUrl: pull from URL (for existing CDN-hosted clips)
  */
-export async function publishVideo({ videoPath, videoUrl, caption, hashtags = [], productId = null }) {
+/**
+ * Query creator info — required by TikTok's Direct Post UX guidelines before
+ * rendering any post/review page. Returns nickname, allowed privacy options,
+ * which interactions are disabled, and the max video duration.
+ */
+export async function getCreatorInfo() {
+  const token = await getAccessToken();
+  if (!token) throw new Error("TikTok not connected — visit /auth/tiktok to connect.");
+  const res = await fetch(`${CONTENT_BASE}/post/publish/creator_info/query/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`TikTok creator_info error ${res.status}: ${await res.text()}`);
+  const json = await res.json();
+  const d = json?.data || {};
+  return {
+    nickname: d.creator_nickname,
+    username: d.creator_username,
+    avatarUrl: d.creator_avatar_url,
+    privacyLevelOptions: d.privacy_level_options || [],
+    commentDisabled: !!d.comment_disabled,
+    duetDisabled: !!d.duet_disabled,
+    stitchDisabled: !!d.stitch_disabled,
+    maxVideoPostDurationSec: d.max_video_post_duration_sec || null,
+  };
+}
+
+/**
+ * Check a post's processing status (publish/status/fetch) — guidelines want
+ * users to be able to see whether their post has finished processing.
+ */
+export async function getPublishStatus(publishId) {
+  const token = await getAccessToken();
+  if (!token) throw new Error("TikTok not connected.");
+  const res = await fetch(`${CONTENT_BASE}/post/publish/status/fetch/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ publish_id: publishId }),
+  });
+  if (!res.ok) throw new Error(`TikTok status fetch error ${res.status}: ${await res.text()}`);
+  const json = await res.json();
+  return json?.data || {};
+}
+
+export async function publishVideo({
+  videoPath, videoUrl, caption, hashtags = [], productId = null,
+  // Review-mode metadata (TikTok-compliant UX passes these explicitly).
+  // When omitted, autonomous-mode defaults apply.
+  privacyLevel = null,
+  allowComment = true, allowDuet = true, allowStitch = true,
+  brandOrganic = false, brandedContent = false,
+}) {
   const token = await getAccessToken();
   if (!token) throw new Error("TikTok not connected — visit /auth/tiktok to connect.");
 
@@ -196,7 +247,8 @@ export async function publishVideo({ videoPath, videoUrl, caption, hashtags = []
   // Do NOT change this to PUBLIC_TO_EVERYONE unless the app has actually
   // passed TikTok's audit — it will be rejected/fail otherwise.
   // Override only if TIKTOK_AUDITED=true is explicitly set once that changes.
-  const privacyLevel = process.env.TIKTOK_AUDITED === "true" ? "PUBLIC_TO_EVERYONE" : "SELF_ONLY";
+  const effectivePrivacy = privacyLevel
+    || (process.env.TIKTOK_AUDITED === "true" ? "PUBLIC_TO_EVERYONE" : "SELF_ONLY");
 
   // Step 1: Initialize the upload
   const initRes = await fetch(`${CONTENT_BASE}/post/publish/video/init/`, {
@@ -205,11 +257,13 @@ export async function publishVideo({ videoPath, videoUrl, caption, hashtags = []
     body: JSON.stringify({
       post_info: {
         title: fullCaption,
-        privacy_level: privacyLevel,
-        disable_duet: false,
-        disable_comment: false,
-        disable_stitch: false,
+        privacy_level: effectivePrivacy,
+        disable_duet: !allowDuet,
+        disable_comment: !allowComment,
+        disable_stitch: !allowStitch,
         video_cover_timestamp_ms: 1000,
+        ...(brandOrganic ? { brand_organic_toggle: true } : {}),
+        ...(brandedContent ? { brand_content_toggle: true } : {}),
       },
       source_info: videoUrl
         ? { source: "PULL_FROM_URL", video_url: videoUrl }
@@ -251,7 +305,7 @@ export async function publishVideo({ videoPath, videoUrl, caption, hashtags = []
     if (!uploadRes.ok) throw new Error(`TikTok video upload error ${uploadRes.status}`);
   }
 
-  return { publishId, privacyLevel };
+  return { publishId, privacyLevel: effectivePrivacy };
 }
 
 /**
