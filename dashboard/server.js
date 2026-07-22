@@ -26,6 +26,8 @@ import multer from "multer";
 import unzipper from "unzipper";
 import { getAllBlockers, resolveBlocker, getPendingBlockers } from "../core/queue.js";
 import { addNote, getAllNotes } from "../core/notes.js";
+import { handleChat } from "../core/chat.js";
+import { getChat, activeMemory, forget as forgetMemory } from "../core/chatMemory.js";
 import { getLog, log } from "../core/logger.js";
 import { loadMemory } from "../core/memory.js";
 import { Ledger } from "../core/ledger.js";
@@ -119,6 +121,48 @@ export function startDashboard() {
       if (!text || !text.trim()) return res.status(400).json({ error: "text is required" });
       const id = addNote(text);
       res.json({ success: true, id });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Chat (live, two-way — ported from Ally) ───────────────────────────────
+  // Instant conversation with Awon. Durable facts/directives he extracts are
+  // saved to living memory (chat-memory.json) and injected into every system
+  // prompt from then on — including the next full cycle.
+  app.get("/api/chat", (req, res) => {
+    try {
+      res.json(getChat(100));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/chat", async (req, res) => {
+    try {
+      const { message } = req.body;
+      if (!message || !String(message).trim()) return res.status(400).json({ error: "message is required" });
+      const result = await handleChat(message);
+      res.json({ success: true, ...result });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/chat-memory", (req, res) => {
+    try {
+      res.json(activeMemory());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/chat-memory/forget", (req, res) => {
+    try {
+      const { id } = req.body;
+      if (!id) return res.status(400).json({ error: "id is required" });
+      forgetMemory(id);
+      res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
