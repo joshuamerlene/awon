@@ -28,6 +28,7 @@ import { getAllBlockers, resolveBlocker, getPendingBlockers } from "../core/queu
 import { addNote, getAllNotes } from "../core/notes.js";
 import { handleChat } from "../core/chat.js";
 import { getChat, activeMemory, forget as forgetMemory } from "../core/chatMemory.js";
+import * as imageBudget from "../core/imageBudget.js";
 import { getLog, log } from "../core/logger.js";
 import { loadMemory } from "../core/memory.js";
 import { Ledger } from "../core/ledger.js";
@@ -75,6 +76,7 @@ export function startDashboard() {
         strategy: memory.strategy,
         nextActions: memory.nextActions,
         budget: ledger.getSummary(),
+        imageBudget: imageBudget.status(),
         pendingBlockers: pending.length,
         tiktokConnected: !!process.env.TIKTOK_CONTENT_ACCESS_TOKEN,
         timestamp: new Date().toISOString(),
