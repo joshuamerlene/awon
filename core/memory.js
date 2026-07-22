@@ -54,6 +54,12 @@ const STALE_BELIEF_PATTERNS = [
   /(tiktok|account|access).{0,40}\bunverified/i,
   /escalat(e|es|ion)/i,
   /binary decision gate/i,
+  /decision gate/i,
+  /decision deadline/i,
+  /force[sd]? josh/i,
+  /josh decision (gate|deadline)/i,
+  /proof of (life|posting)/i,
+  /ultimatum/i,
   /exclusive, permanent control/i,
   /josh'?s human execution/i,
   /deadline (threat|forces)/i,
@@ -70,6 +76,13 @@ const STALE_BELIEF_PATTERNS = [
 ];
 
 function scrubStaleBeliefs(memory) {
+  // The strategy field itself was left out of the original scrub, so ultimatum
+  // language ("decision gate Friday", "operator escalates Monday") survived in
+  // memory.strategy and re-seeded every cycle's thinking. Reset it on sight.
+  if (typeof memory.strategy === "string" && STALE_BELIEF_PATTERNS.some((rx) => rx.test(memory.strategy))) {
+    memory.strategy =
+      "Sell. Make the store's products and presentation genuinely great, grow owned channels (email list first), and produce content that earns attention. No ultimatums — just work.";
+  }
   if (Array.isArray(memory.learnings)) {
     memory.learnings = memory.learnings.filter((l) => {
       const text = typeof l === "string" ? l : (l && l.insight) || "";
