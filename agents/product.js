@@ -23,6 +23,7 @@ import * as shopify from "../integrations/shopify.js";
 import * as printful from "../integrations/printful.js";
 import * as cj from "../integrations/cj.js";
 import * as design from "../integrations/design.js";
+import * as imageBudget from "../core/imageBudget.js";
 
 // Products that should be replaced by POD equivalents (titles are partial matches)
 const LEGACY_PRODUCTS_TO_REPLACE = [
@@ -117,6 +118,7 @@ PRINT DESIGNS — each newPODProduct picks its own via "design":
 - For "type": "ai", write a tight "prompt" describing ONE bold emblem/illustration (the brand art direction — dark-garment-ready, high contrast, transparent, no text unless you ask — is added for you). Examples: "a sheathed sword wrapped in laurel, minimalist single-line emblem", "a lone figure climbing a mountain at dawn, bold woodcut style", "a snarling wolf head crest, geometric low-poly". Reach for "ai" when a graphic would sell the piece better than words. (If the image key isn't configured yet it silently falls back to the logo, so it's always safe to try.)
 - "color": "white" for dark garments (the brand default), "black" only when the product will be light-colored (applies to logo/text designs).
 - Vary the catalog: don't put the identical design on everything — mix logo pieces, text pieces, and AI graphics.
+- AI IMAGE BUDGET — ${imageBudget.budgetLine()}
 
 HARD RULE on "kill" and "replacesProductId": products Josh added by hand are HIS. You may suggest removals in "kill" (they will be shown to him, not executed), but never target his manual listings with replacesProductId unless the listing is literally an Amazon affiliate link. An empty supplements or equipment collection is a catalog failure, not a cleanup win — prefer improving copy/imagery of existing listings over removing them.
 
