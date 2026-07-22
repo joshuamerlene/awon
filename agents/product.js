@@ -94,7 +94,7 @@ Return JSON:
       "retailPrice": 34.99,
       "contentAngle": "how to feature this on TikTok",
       "urgency": "add now|add soon|test first",
-      "design": { "type": "logo|text", "text": "TRIM", "color": "white|black" }
+      "design": { "type": "logo|text|ai", "text": "TRIM", "color": "white|black", "prompt": "only for type ai — a short brief for the graphic to generate" }
     }
   ],
   "newDropshipCandidates": [
@@ -112,10 +112,11 @@ Return JSON:
 }
 
 PRINT DESIGNS — each newPODProduct picks its own via "design":
-- "type": "logo" prints the brand logo mark. "type": "text" renders your text in Archivo Black (the brand's own heading typeface), ALL CAPS, transparent background, front placement.
+- "type": "logo" prints the brand logo mark. "type": "text" renders your text in Archivo Black (the brand's own heading typeface), ALL CAPS, transparent background, front placement. "type": "ai" GENERATES a real graphic — an emblem, crest, or illustration — from a "prompt" you write, on a transparent background at print resolution (this is how you make genuinely cool, original merch instead of only text and logo pieces).
 - Text designs are where the brand voice lives on merch. "TRIM" is the brand acronym for THE RIVAL IS ME — a strong, clean design on its own. Other good text: short discipline-forward statements, 1-3 words per line, max 2 lines (separate lines with \\n). Think "TRIM", "THE RIVAL\\nIS ME", "DISCIPLINE\\nFIRST", "NO ONE\\nIS COMING". Never long sentences.
-- "color": "white" for dark garments (the brand default), "black" only when the product will be light-colored.
-- Vary the catalog: don't put the identical design on everything — mix logo pieces and different text pieces.
+- For "type": "ai", write a tight "prompt" describing ONE bold emblem/illustration (the brand art direction — dark-garment-ready, high contrast, transparent, no text unless you ask — is added for you). Examples: "a sheathed sword wrapped in laurel, minimalist single-line emblem", "a lone figure climbing a mountain at dawn, bold woodcut style", "a snarling wolf head crest, geometric low-poly". Reach for "ai" when a graphic would sell the piece better than words. (If the image key isn't configured yet it silently falls back to the logo, so it's always safe to try.)
+- "color": "white" for dark garments (the brand default), "black" only when the product will be light-colored (applies to logo/text designs).
+- Vary the catalog: don't put the identical design on everything — mix logo pieces, text pieces, and AI graphics.
 
 HARD RULE on "kill" and "replacesProductId": products Josh added by hand are HIS. You may suggest removals in "kill" (they will be shown to him, not executed), but never target his manual listings with replacesProductId unless the listing is literally an Amazon affiliate link. An empty supplements or equipment collection is a catalog failure, not a cleanup win — prefer improving copy/imagery of existing listings over removing them.
 
@@ -194,15 +195,30 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
           continue;
         }
 
-        // Resolve this product's print design: brand text rendered in
-        // Archivo Black if the model asked for it, otherwise the logo.
-        // A failed text render falls back to the logo — never blocks.
+        // Resolve this product's print design by the model's chosen type:
+        //   "ai"   → an OpenAI-generated brand graphic (real emblem/illustration)
+        //   "text" → brand text rendered in Archivo Black
+        //   "logo" → the store logo mark (default / fallback)
+        // Any generation failure falls back to the logo — never blocks.
         let designUrl = logoUrl;
-        if (candidate.design?.type === "text" && candidate.design?.text) {
+        const dsgn = candidate.design || {};
+        if (dsgn.type === "ai" && dsgn.prompt) {
+          if (design.hasImageGen()) {
+            try {
+              const rendered = await design.generateGraphicDesign(dsgn.prompt);
+              designUrl = rendered.url;
+              log("action", `Generated AI graphic for "${candidate.suggestedTitle}" (${String(dsgn.prompt).slice(0, 60)}...) → ${rendered.url}`);
+            } catch (err) {
+              log("error", `AI graphic gen failed for "${candidate.suggestedTitle}" (${err.message}) — using store logo instead.`);
+            }
+          } else {
+            log("system", `Model chose an AI graphic for "${candidate.suggestedTitle}" but OPENAI_API_KEY isn't set in Railway — using the logo. Add the key to enable AI designs.`);
+          }
+        } else if (dsgn.type === "text" && dsgn.text) {
           try {
-            const rendered = await design.renderTextDesign(candidate.design.text, { color: candidate.design.color });
+            const rendered = await design.renderTextDesign(dsgn.text, { color: dsgn.color });
             designUrl = rendered.url;
-            log("action", `Rendered brand text design "${String(candidate.design.text).replace(/\n/g, " / ")}" (${candidate.design.color || "white"}) for "${candidate.suggestedTitle}" → ${rendered.url}`);
+            log("action", `Rendered brand text design "${String(dsgn.text).replace(/\n/g, " / ")}" (${dsgn.color || "white"}) for "${candidate.suggestedTitle}" → ${rendered.url}`);
           } catch (err) {
             log("error", `Text design render failed for "${candidate.suggestedTitle}" (${err.message}) — using store logo instead.`);
           }
