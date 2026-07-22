@@ -20,6 +20,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import * as imageBudget from "../core/imageBudget.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESIGN_DIR = path.join(__dirname, "..", "data", "designs");
@@ -170,6 +171,16 @@ export async function generateGraphicDesign(brief, { size = "1024x1024", quality
   if (!key) throw new Error("OPENAI_API_KEY not set — cannot generate an AI graphic.");
   if (!brief || !String(brief).trim()) throw new Error("No design brief given.");
 
+  // Hard monthly cap — refuse before spending if this image would exceed it.
+  const estCost = imageBudget.estimateCost(size, quality);
+  if (!imageBudget.canAfford(size, quality)) {
+    const s = imageBudget.status();
+    throw new Error(
+      `Monthly AI-image budget reached: $${s.spentUsd.toFixed(2)} of $${s.capUsd.toFixed(2)} used ` +
+      `this month (${s.month}). Skipping AI graphic — resets next month.`
+    );
+  }
+
   const prompt = `${BRAND_ART_DIRECTION}\n\nTHE GRAPHIC TO CREATE: ${String(brief).trim()}`;
 
   const res = await fetch("https://api.openai.com/v1/images/generations", {
@@ -200,6 +211,9 @@ export async function generateGraphicDesign(brief, { size = "1024x1024", quality
   const filename = `ai_${slug}_${Date.now()}.png`;
   const outPath = path.join(designsDir(), filename);
   fs.writeFileSync(outPath, buf);
+
+  // Charge the monthly image budget for what we just generated.
+  imageBudget.record(estCost, { filename, brief: String(brief).slice(0, 80), size, quality });
 
   return { url: `${publicBase()}/designs/${filename}`, path: outPath, filename };
 }
