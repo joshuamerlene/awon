@@ -126,3 +126,81 @@ export async function renderTextDesign(text, { color = "white" } = {}) {
 
   return { url: `${publicBase()}/designs/${filename}`, path: outPath, filename };
 }
+
+// ── AI graphic designs (OpenAI gpt-image-1) ─────────────────────────────────
+// Lets Awon generate a real GRAPHIC — an emblem, crest, or illustration — as a
+// print file, instead of only text or the logo mark. Transparent background,
+// print resolution, written to data/designs/ and served at /designs/<file>.png
+// exactly like the text designs, so the whole Printful pipeline is unchanged.
+//
+// Requires OPENAI_API_KEY in the environment. Without it, generateGraphicDesign
+// throws and the caller falls back to a text/logo design — so a missing key (or
+// any API failure) can never block product creation. Uses raw fetch (no SDK),
+// so no new dependency to install.
+
+const BRAND_ART_DIRECTION =
+  "Design a bold, high-contrast graphic to be screen-printed on a premium DARK " +
+  "athletic garment for the fitness brand 'The Rival Is Me' — a discipline / " +
+  "self-mastery / faith / grit brand whose whole idea is that the rival you fight " +
+  "is your own weaker, lazier self. Produce ONE centered emblem or illustration " +
+  "with a strong, clean silhouette and vector-like shapes. Use a limited palette " +
+  "that reads well on black fabric (mostly whites and greys, at most one restrained " +
+  "accent color). No photographic background, no busy gradients that would muddy on " +
+  "fabric, no mockup, no garment, no borders, no watermark. Output the artwork ALONE " +
+  "on a fully transparent background. Do not add any text unless it is explicitly " +
+  "requested in the brief.";
+
+/** True if AI image generation is available (OPENAI_API_KEY present). */
+export function hasImageGen() {
+  return !!process.env.OPENAI_API_KEY;
+}
+
+/**
+ * Generate a print-ready brand graphic from a short brief via OpenAI gpt-image-1.
+ *
+ * @param {string} brief — what the graphic should depict (e.g. "a sheathed sword
+ *   wrapped in a laurel, minimalist line-emblem style"). Wrapped in the brand
+ *   art direction above.
+ * @param {object} opts  — { size: "1024x1024"|"1024x1536"|"1536x1024",
+ *                           quality: "high"|"medium"|"low" }
+ * @returns {{ url, path, filename }} same shape as renderTextDesign.
+ */
+export async function generateGraphicDesign(brief, { size = "1024x1024", quality = "high" } = {}) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error("OPENAI_API_KEY not set — cannot generate an AI graphic.");
+  if (!brief || !String(brief).trim()) throw new Error("No design brief given.");
+
+  const prompt = `${BRAND_ART_DIRECTION}\n\nTHE GRAPHIC TO CREATE: ${String(brief).trim()}`;
+
+  const res = await fetch("https://api.openai.com/v1/images/generations", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-image-1",
+      prompt,
+      n: 1,
+      size,
+      quality,
+      background: "transparent", // requires png output; gpt-image-1 returns b64 png
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`OpenAI image gen ${res.status}: ${body.slice(0, 300)}`);
+  }
+
+  const json = await res.json();
+  const b64 = json?.data?.[0]?.b64_json;
+  if (!b64) throw new Error("OpenAI returned no image data.");
+  const buf = Buffer.from(b64, "base64");
+  if (buf.length < 5000) throw new Error("AI image came back suspiciously small — not saving.");
+
+  const slug = String(brief).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "graphic";
+  const filename = `ai_${slug}_${Date.now()}.png`;
+  const outPath = path.join(designsDir(), filename);
+  fs.writeFileSync(outPath, buf);
+
+  return { url: `${publicBase()}/designs/${filename}`, path: outPath, filename };
+}
+
