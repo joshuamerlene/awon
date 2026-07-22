@@ -136,6 +136,30 @@
   .footage-item .footage-name { color: var(--text); }
   .footage-item .footage-meta { color: var(--muted); font-size: 10px; }
 
+  /* ── Chat (Talk to Awon) ── */
+  .chat-panel { grid-column: 1 / -1; }
+  .chat-thread { display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow-y: auto; padding: 4px 2px; margin-bottom: 14px; }
+  .chat-bubble { max-width: 78%; padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
+  .chat-bubble.josh { align-self: flex-end; background: var(--accent); color: #000; border-bottom-right-radius: 3px; }
+  .chat-bubble.awon { align-self: flex-start; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-bottom-left-radius: 3px; }
+  .chat-bubble .chat-time { display: block; font-size: 9px; opacity: 0.6; margin-top: 4px; }
+  .chat-form { display: flex; gap: 8px; }
+  .chat-input { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 11px 14px; border-radius: 8px; font-size: 13px; outline: none; font-family: inherit; resize: none; min-height: 44px; max-height: 140px; }
+  .chat-input:focus { border-color: var(--accent); }
+  .chat-send { background: var(--accent); color: #000; border: none; padding: 0 20px; border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 13px; }
+  .chat-send:disabled { opacity: 0.5; cursor: wait; }
+  .chat-hint { font-size: 11px; color: var(--muted); margin-top: 8px; }
+  .chat-saved { font-size: 11px; color: var(--accent-dim); margin-top: 6px; display: none; }
+
+  /* ── What Awon Knows ── */
+  .memory-item { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; background: var(--bg); border: 1px solid var(--border); border-left: 2px solid var(--accent-dim); border-radius: 6px; padding: 9px 12px; margin-bottom: 6px; }
+  .memory-item.directive { border-left-color: #f59e0b; }
+  .memory-item .memory-text { font-size: 12px; color: var(--text); line-height: 1.5; }
+  .memory-item .memory-until { font-size: 10px; color: var(--muted); display: block; margin-top: 2px; }
+  .memory-forget { background: none; border: 1px solid var(--border); color: var(--muted); font-size: 10px; padding: 3px 8px; border-radius: 5px; cursor: pointer; flex-shrink: 0; }
+  .memory-forget:hover { border-color: var(--red); color: var(--red); }
+  .memory-empty { color: var(--muted); text-align: center; padding: 12px; font-size: 12px; }
+
   /* ── Refresh ── */
   .refresh-btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; }
   .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
@@ -226,20 +250,30 @@
       </div>
     </div>
 
-    <!-- Notes to Awon -->
-    <div class="panel notes-panel">
+    <!-- Talk to Awon (live chat + living memory, ported from Ally) -->
+    <div class="panel chat-panel">
       <div class="panel-header">
         <span class="panel-title">Talk To Awon</span>
+        <span class="badge green">Live</span>
       </div>
-      <div class="note-form">
-        <textarea class="note-input" id="note-input" placeholder="Point him in a direction, give him context, tell him to change course — he'll read it and reply at the start of his next cycle."></textarea>
-        <div class="note-form-row">
-          <span class="note-hint">Read on Awon's next cycle — not instant.</span>
-          <button class="resolve-btn" onclick="submitNote()">Send to Awon →</button>
-        </div>
+      <div class="chat-thread" id="chat-thread">
+        <div class="memory-empty">Say something — Awon replies instantly, and anything durable you tell him becomes part of how he runs the store.</div>
       </div>
-      <div class="note-list" id="notes-container">
-        <div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No notes yet.</div>
+      <div class="chat-form">
+        <textarea class="chat-input" id="chat-input" placeholder="Tell Awon how it's going, what to push, what to change..." rows="1"></textarea>
+        <button class="chat-send" id="chat-send" onclick="sendChat()">Send</button>
+      </div>
+      <div class="chat-hint">Facts and directives you give him are saved to his living memory and steer every decision — timed ones (like "push hoodies for a week") expire on their own.</div>
+      <div class="chat-saved" id="chat-saved"></div>
+    </div>
+
+    <!-- What Awon Knows -->
+    <div class="panel" style="grid-column: 1 / -1;">
+      <div class="panel-header">
+        <span class="panel-title">What Awon Knows</span>
+      </div>
+      <div id="memory-container">
+        <div class="memory-empty">Nothing saved yet — talk to him.</div>
       </div>
     </div>
 
@@ -496,45 +530,97 @@ async function uploadFootage() {
   } catch(e) { alert("Upload failed. Try again — videos must be mp4/mov/m4v under 500MB, archives must be .zip."); }
 }
 
-async function loadNotes() {
+function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function renderChat(turns) {
+  const thread = document.getElementById("chat-thread");
+  if (!turns.length) {
+    thread.innerHTML = `<div class="memory-empty">Say something — Awon replies instantly, and anything durable you tell him becomes part of how he runs the store.</div>`;
+    return;
+  }
+  thread.innerHTML = turns.map(t => `
+    <div class="chat-bubble ${t.role === "josh" ? "josh" : "awon"}">${escapeHtml(t.text)}<span class="chat-time">${relativeTime(t.at)}</span></div>
+  `).join("");
+  thread.scrollTop = thread.scrollHeight;
+}
+
+async function loadChat() {
   try {
-    const notes = await apiFetch("/api/notes");
-    const container = document.getElementById("notes-container");
-    if (notes.length === 0) {
-      container.innerHTML = `<div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No notes yet.</div>`;
-      return;
-    }
-    container.innerHTML = notes.map(n => `
-      <div class="note-item ${n.consumed ? 'consumed' : ''}">
-        <div class="note-text">${n.text}</div>
-        <div class="note-meta">
-          <span class="note-status">${n.consumed ? '✓ Read by Awon' : 'Waiting for next cycle'}</span>
-          <span>${relativeTime(n.createdAt)}</span>
-        </div>
-        ${n.response ? `
-          <div class="note-response">
-            <span class="note-response-label">Awon replied</span>
-            ${n.response}
-          </div>
-        ` : ""}
-      </div>
-    `).join("");
+    renderChat(await apiFetch("/api/chat"));
   } catch(e) {}
 }
 
-async function submitNote() {
-  const input = document.getElementById("note-input");
+async function sendChat() {
+  const input = document.getElementById("chat-input");
+  const btn = document.getElementById("chat-send");
   const text = input.value.trim();
   if (!text) { input.focus(); return; }
+  btn.disabled = true;
+  btn.textContent = "...";
   try {
-    await fetch("/api/notes", {
+    const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-dashboard-token": TOKEN },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ message: text }),
     });
+    if (!res.ok) throw new Error();
+    const data = await res.json();
     input.value = "";
-    loadNotes();
-  } catch(e) { alert("Failed to send note. Try again."); }
+    await loadChat();
+    await loadMemory();
+    const savedEl = document.getElementById("chat-saved");
+    const nFacts = data.saved?.facts?.length || 0;
+    const nDirs = data.saved?.directives?.length || 0;
+    if (nFacts || nDirs) {
+      savedEl.textContent = `Saved to memory: ${nFacts} fact(s), ${nDirs} directive(s).`;
+      savedEl.style.display = "block";
+      setTimeout(() => { savedEl.style.display = "none"; }, 6000);
+    }
+  } catch(e) {
+    alert("Failed to send. Try again.");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Send";
+  }
+}
+
+async function loadMemory() {
+  try {
+    const m = await apiFetch("/api/chat-memory");
+    const container = document.getElementById("memory-container");
+    const facts = m.facts || [];
+    const directives = m.directives || [];
+    if (!facts.length && !directives.length) {
+      container.innerHTML = `<div class="memory-empty">Nothing saved yet — talk to him.</div>`;
+      return;
+    }
+    container.innerHTML =
+      facts.map(f => `
+        <div class="memory-item">
+          <span class="memory-text">${escapeHtml(f.text)}</span>
+          <button class="memory-forget" onclick="forgetMemory('${f.id}')">Forget</button>
+        </div>
+      `).join("") +
+      directives.map(d => `
+        <div class="memory-item directive">
+          <span class="memory-text">${escapeHtml(d.text)}${d.expiresAt ? `<span class="memory-until">until ${new Date(d.expiresAt).toLocaleDateString()}</span>` : ""}</span>
+          <button class="memory-forget" onclick="forgetMemory('${d.id}')">Stop</button>
+        </div>
+      `).join("");
+  } catch(e) {}
+}
+
+async function forgetMemory(id) {
+  try {
+    await fetch("/api/chat-memory/forget", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-dashboard-token": TOKEN },
+      body: JSON.stringify({ id }),
+    });
+    loadMemory();
+  } catch(e) { alert("Failed. Try again."); }
 }
 
 async function loadLog() {
@@ -586,8 +672,13 @@ async function loadSandbox() {
 
 async function loadAll() {
   await loadStatus();
-  await Promise.all([loadBlockers(), loadNotes(), loadLog(), loadSandbox(), loadFootage()]);
+  await Promise.all([loadBlockers(), loadChat(), loadMemory(), loadLog(), loadSandbox(), loadFootage()]);
 }
+
+// Enter sends the chat message (Shift+Enter for a newline)
+document.getElementById("chat-input").addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
+});
 
 // Try auto-login with stored token
 if (TOKEN) loadAll();
