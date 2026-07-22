@@ -219,6 +219,16 @@
           <div class="value small" id="budget-payout">—</div>
         </div>
       </div>
+      <div id="image-budget-row" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
+        <label style="font-size:10px;color:var(--muted);letter-spacing:0.1em;display:block;margin-bottom:6px;">AI IMAGE BUDGET (THIS MONTH)</label>
+        <div style="display:flex;align-items:baseline;gap:8px;">
+          <span id="image-budget-spent" style="font-size:16px;font-weight:700;color:var(--accent);">—</span>
+          <span id="image-budget-meta" style="font-size:11px;color:var(--muted);"></span>
+        </div>
+        <div style="height:6px;background:var(--bg);border-radius:99px;margin-top:8px;overflow:hidden;">
+          <div id="image-budget-bar" style="height:100%;width:0%;background:var(--accent);border-radius:99px;transition:width .3s;"></div>
+        </div>
+      </div>
       <div class="budget-actions">
         <div class="budget-action-row">
           <input type="number" id="add-funds-input" placeholder="Amount, e.g. 10" min="0" step="0.01" />
@@ -369,6 +379,16 @@ async function loadStatus() {
     document.getElementById("clear-payout-row").style.display = s.budget.ownerPayoutOwedUsd > 0 ? "flex" : "none";
     document.getElementById("strategy-text").textContent = s.strategy || "Initializing...";
     document.getElementById("tiktok-connect-link").style.display = s.tiktokConnected ? "none" : "inline-block";
+
+    if (s.imageBudget) {
+      const ib = s.imageBudget;
+      document.getElementById("image-budget-spent").textContent = `$${Number(ib.spentUsd).toFixed(2)} / $${Number(ib.capUsd).toFixed(2)}`;
+      document.getElementById("image-budget-meta").textContent = `${ib.count} image${ib.count === 1 ? "" : "s"} · $${Number(ib.remainingUsd).toFixed(2)} left`;
+      const pct = ib.capUsd > 0 ? Math.min(100, (ib.spentUsd / ib.capUsd) * 100) : 0;
+      const bar = document.getElementById("image-budget-bar");
+      bar.style.width = `${pct}%`;
+      bar.style.background = pct >= 100 ? "var(--red)" : "var(--accent)";
+    }
 
     const nextEl = document.getElementById("next-actions");
     nextEl.innerHTML = (s.nextActions || []).map(a => `<div class="next-action">→ ${a}</div>`).join("");
