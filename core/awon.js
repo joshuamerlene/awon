@@ -18,6 +18,7 @@ import { Ledger } from "./ledger.js";
 import { loadMemory, saveMemory, addLearning } from "./memory.js";
 import { getPendingBlockers, getResolvedBlockers, markProcessed, addBlocker, addBlockerOnce } from "./queue.js";
 import { getUnconsumedNotes, markConsumed as markNoteConsumed } from "./notes.js";
+import { pruneExpired } from "./chatMemory.js";
 import * as reviewQueue from "./reviewQueue.js";
 import { log } from "./logger.js";
 import { runProductAgent } from "../agents/product.js";
@@ -34,6 +35,10 @@ import * as video from "../integrations/video.js";
 
 export async function runCycle() {
   log("system", "=== Awon cycle starting ===");
+
+  // Timed directives from Josh's chat expire on their own schedule — campaigns
+  // stop themselves. (Living memory itself is injected via core/claude.js.)
+  try { pruneExpired(); } catch { /* non-fatal */ }
 
   const ledger = new Ledger();
   const memory = loadMemory();
