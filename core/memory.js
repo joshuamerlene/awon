@@ -60,6 +60,26 @@ const STALE_BELIEF_PATTERNS = [
   /josh decision (gate|deadline)/i,
   /proof of (life|posting)/i,
   /ultimatum/i,
+  // ── The "capability boundary / I prepare, Josh publishes" delegation belief.
+  // This is FALSE (Awon publishes products, listings, blogs, collections, store
+  // changes directly). It regenerated for 40+ cycles via self_critique, made
+  // Awon sandbag and tell Josh he was "waiting on him," and kept the catalog
+  // from being built. Scrub every variant on every load.
+  /capability[- ]?(boundary|first)/i,
+  /josh'?s\s+(work|role|lane|job|part|hands|column)\b/i,
+  /josh\s+(executes|publishes|posts|owns all|reviews and)/i,
+  /i (prepare|draft)[,;].{0,70}(josh|he)\s+(execut|publish|post|review)/i,
+  /prepare[s]?\b.{0,50}\bjosh\b.{0,25}(execut|publish|post)/i,
+  /(publishing|posting|execution)\s*[=:]\s*(josh|external)/i,
+  /i cannot claim execution/i,
+  /proof artifacts?\b/i,
+  /external\s+(account\s+)?(access|posting|execution|verification)/i,
+  /outside (my|this)\s+text\s+(interface|sandbox)/i,
+  /text (interface|sandbox)\b/i,
+  /aspirational delegation/i,
+  /my (lane|column)\b/i,
+  /within (my|the) capability/i,
+  /publishing (live )?= josh/i,
   /exclusive, permanent control/i,
   /josh'?s human execution/i,
   /deadline (threat|forces)/i,
