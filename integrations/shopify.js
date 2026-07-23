@@ -55,6 +55,47 @@ export async function archiveProduct(productId) {
   return updateProduct(productId, { status: "archived" });
 }
 
+// -- Collections --
+// Products Awon creates go live storewide but weren't showing in the nav
+// collections (e.g. MERCH / "frontpage" had only 3 items). These let him drop
+// each new product into the right collection so the storefront looks as full
+// as it is. Note: the Collect API only works on CUSTOM (manual) collections;
+// smart/automated collections populate by their own rules, so a handle that
+// resolves to a smart collection just returns null here (safe no-op).
+
+export async function listCustomCollections() {
+  const data = await req(`/custom_collections.json?limit=250`);
+  return data?.custom_collections || [];
+}
+
+export async function findCollectionByHandle(handle) {
+  const h = String(handle).toLowerCase();
+  const cols = await listCustomCollections();
+  return cols.find((c) => (c.handle || "").toLowerCase() === h || (c.title || "").toLowerCase() === h) || null;
+}
+
+export async function addProductToCollection(productId, collectionId) {
+  const data = await req(`/collects.json`, {
+    method: "POST",
+    body: JSON.stringify({ collect: { product_id: productId, collection_id: collectionId } }),
+  });
+  return data?.collect;
+}
+
+// Best-effort: add a product to a custom collection by handle/title. Resolves
+// the collection, skips silently if it isn't a custom (manual) collection, and
+// never throws — a product is already live storewide regardless.
+export async function addProductToCollectionByHandle(productId, handle) {
+  try {
+    const col = await findCollectionByHandle(handle);
+    if (!col) return { ok: false, reason: `no custom collection "${handle}"` };
+    await addProductToCollection(productId, col.id);
+    return { ok: true, collectionId: col.id };
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  }
+}
+
 /**
  * Reprice a product safely. The old approach — PUT /products/{id}.json with
  * `variants: [{ price }]` (no variant ids) — REPLACES the variant array, which
