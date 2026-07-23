@@ -242,6 +242,13 @@ Be decisive. If the catalog needs cleanup, call it. If Printful is available, re
           design.saveProductDesign(product.id, designUrl);
         }
 
+        // Surface it in the MERCH ("frontpage") collection so it shows in the
+        // store nav, not just under All Products. Non-fatal if it can't.
+        try {
+          const r = await shopify.addProductToCollectionByHandle(product.id, "frontpage");
+          if (r.ok) log("action", `Added "${candidate.suggestedTitle}" to the MERCH collection.`);
+        } catch { /* product is still live storewide */ }
+
         createdPODProducts.push({
           printfulId: product.id,
           title: candidate.suggestedTitle,
