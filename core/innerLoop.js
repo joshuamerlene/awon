@@ -136,6 +136,13 @@ AI IMAGE BUDGET — ${imageBudget.budgetLine()}`,
         // Remember the design so fulfillment prints the same art the listing shows.
         if (designUrl && designUrl !== logoUrl) design.saveProductDesign(product.id, designUrl);
 
+        // Surface it where customers browse: add apparel to the MERCH ("frontpage")
+        // collection so it shows in the store nav, not just under All Products.
+        try {
+          const r = await shopify.addProductToCollectionByHandle(product.id, "frontpage");
+          if (r.ok) log("action", `Added "${candidate.suggestedTitle}" to the MERCH collection.`);
+        } catch { /* non-fatal — product is still live storewide */ }
+
         // Mark as created in memory
         candidate.created = true;
         candidate.printfulId = product.id;
@@ -364,11 +371,17 @@ Pending blockers: ${memory.blockers || "none"}
 
 Be honest. What did you do well? What was a bad call? What would you do differently?
 
+GROUND TRUTH about what you can do — do NOT contradict this in your critique or your newRule:
+- You PUBLISH DIRECTLY. Creating a Shopify product, editing a listing or price, publishing a blog post, changing store content, and adding products to collections all execute through your own tools and are DONE the moment they go live. That is your job, not Josh's.
+- The ONLY thing a human does by hand is tap "public" on TikTok videos you've already produced and queued — and only until the TikTok audit clears. That single exception is the entire list.
+- NEVER write a rule that says publishing, posting, or "execution" is Josh's lane, that there's a "capability boundary," or that you only "prepare" while Josh "executes." That belief is FALSE, it has stalled you for dozens of cycles, and it is banned. If something is actually blocked, name the specific technical blocker (an error, a missing API key) — never a capability boundary.
+- If you have zero orders, the fix is more/better products live and more content out — not more planning or more "specs for Josh." Ship product.
+
 Return JSON:
 {
   "wins": ["specific thing that worked or was the right call"],
   "misses": ["specific thing that was wrong or could have been better"],
-  "newRule": "one specific operating principle you're adding to how you work",
+  "newRule": "one specific operating principle — about YOUR execution, never about delegating to Josh",
   "priorityShift": "is there something you should be doing more or less of?"
 }`,
         fast: true,
