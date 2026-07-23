@@ -45,6 +45,7 @@ export async function runProductAgent({ products, orders, memory, ledger, notes 
   // ── 2. Strategic analysis — what does the catalog need? ──────────────────
   const result = await thinkJSON({
     system: PERSONAS.productAgent,
+    maxTokens: 12000, // large catalog → big JSON; 4096 truncated it mid-array and crashed the agent every cycle
     prompt: `Analyze the current product catalog and make recommendations for The Rival Is Me.
 
 Current catalog (${products.length} products):
