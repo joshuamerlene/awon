@@ -52,16 +52,44 @@ export async function think({ system, prompt, maxTokens = 4096, fast = false }) 
 }
 
 /**
- * JSON-returning variant. Throws on parse failure.
+ * JSON-returning variant. Resilient: strips fences, extracts the outermost
+ * JSON value, and if parsing still fails, retries the call ONCE with a stricter
+ * instruction before giving up. This matters because the product agent returns
+ * a large JSON (dozens of products with quote-heavy descriptions) and a single
+ * unescaped quote used to crash the whole agent every cycle ("Expected
+ * double-quoted property name in JSON at position …").
  */
+function parseLooseJSON(raw) {
+  let s = String(raw).replace(/```json|```/g, "").trim();
+  // Grab the outermost {...} or [...] so trailing prose can't break the parse.
+  const start = s.search(/[{[]/);
+  const end = Math.max(s.lastIndexOf("}"), s.lastIndexOf("]"));
+  if (start >= 0 && end > start) s = s.slice(start, end + 1);
+  try {
+    return JSON.parse(s);
+  } catch (e) {
+    // Last-ditch repairs for the common offenders: trailing commas.
+    const repaired = s.replace(/,\s*([}\]])/g, "$1");
+    return JSON.parse(repaired);
+  }
+}
+
 export async function thinkJSON({ system, prompt, maxTokens = 4096, fast = false }) {
-  const raw = await think({
-    system: `${system}\n\nIMPORTANT: Respond with ONLY valid JSON. No markdown, no explanation outside the JSON object.`,
-    prompt,
-    maxTokens,
-    fast,
-  });
-  return JSON.parse(raw.replace(/```json|```/g, "").trim());
+  const baseSystem = `${system}\n\nIMPORTANT: Respond with ONLY valid JSON. No markdown, no explanation outside the JSON object. Every double-quote INSIDE a string value must be escaped as \\".`;
+  let raw = await think({ system: baseSystem, prompt, maxTokens, fast });
+  try {
+    return parseLooseJSON(raw);
+  } catch (e1) {
+    // One repair retry — the model reliably fixes it when told its last output
+    // was invalid. Beats crashing the whole agent for the cycle.
+    raw = await think({
+      system: `${baseSystem}\n\nYour previous reply was NOT valid JSON and could not be parsed. Return STRICT, valid JSON only this time — escape every inner double-quote, no trailing commas, no commentary.`,
+      prompt,
+      maxTokens,
+      fast,
+    });
+    return parseLooseJSON(raw);
+  }
 }
 
 // ---------------------------------------------------------------------------
