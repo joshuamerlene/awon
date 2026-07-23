@@ -171,6 +171,40 @@ export function startDashboard() {
   });
 
   // ── Budget ────────────────────────────────────────────────────────────────
+  // -- Backfill collections --
+  // One-time: drop every apparel product already live into the MERCH
+  // ("frontpage") collection so the storefront nav shows the full catalog, not
+  // just the 3 originals. Fire-and-forget (throttled) so the HTTP call returns
+  // immediately; progress lands in the activity log.
+  app.post("/api/backfill-collections", (req, res) => {
+    res.json({ ok: true, status: "started — check the activity log for results" });
+    (async () => {
+      try {
+        const col = await shopify.findCollectionByHandle("frontpage");
+        if (!col) {
+          log("system", "Backfill: 'frontpage' is not a custom collection (may be smart/auto) — cannot add via API. No change made.");
+          return;
+        }
+        const products = await shopify.getProducts();
+        const isApparel = (p) =>
+          /pod|pf_dropship/i.test(p.tags || "") ||
+          /shirt|tee\b|tank|hoodie|jogger|short|sweatshirt|long ?sleeve|\bhat\b|beanie|crewneck|apparel|gear/i.test(
+            `${p.product_type || ""} ${p.title || ""}`
+          );
+        const targets = products.filter(isApparel);
+        let added = 0, failed = 0;
+        for (const p of targets) {
+          try { await shopify.addProductToCollection(p.id, col.id); added++; }
+          catch { failed++; }
+          await new Promise((r) => setTimeout(r, 300)); // Shopify REST rate limit
+        }
+        log("action", `Backfill complete: added ${added}/${targets.length} apparel products to the MERCH collection (${failed} already-in/failed).`);
+      } catch (e) {
+        log("error", `Backfill collections failed: ${e.message}`);
+      }
+    })();
+  });
+
   app.post("/api/budget/add-funds", (req, res) => {
     try {
       const amount = Number(req.body?.amount);
