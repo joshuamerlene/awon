@@ -22,6 +22,8 @@ import { addLearning } from "./memory.js";
 import { addBlockerOnce } from "./queue.js";
 import * as shopify from "../integrations/shopify.js";
 import * as printful from "../integrations/printful.js";
+import * as design from "../integrations/design.js";
+import * as imageBudget from "./imageBudget.js";
 
 const MAX_MINUTES = Number(process.env.INNER_LOOP_MINUTES || 40);
 const MAX_TASKS   = Number(process.env.INNER_LOOP_MAX_TASKS || 10);
@@ -63,11 +65,15 @@ Return JSON:
       "estimatedCOGS": 14.00,
       "marginPercent": 60,
       "tiktokAngle": "how to feature this on TikTok",
-      "urgency": "add now|add soon|test first"
+      "urgency": "add now|add soon|test first",
+      "design": { "type": "logo|text|ai", "text": "TRIM", "color": "white|black", "prompt": "only for type ai — a short brief for the graphic to generate" }
     }
   ],
   "categoryVerdict": "is this category worth pursuing for The Rival Is Me?"
-}`,
+}
+
+Each candidate picks its own print "design": "logo" (the brand mark), "text" (short brand words rendered in Archivo Black — e.g. "TRIM", "NO ONE IS COMING"), or "ai" (GENERATE a real emblem/illustration from a "prompt" you write — this is how you make genuinely cool, original merch instead of only text and logo pieces). Vary it across candidates; reach for "ai" when a graphic would sell the piece better than words.
+AI IMAGE BUDGET — ${imageBudget.budgetLine()}`,
         fast: true,
       });
 
@@ -95,14 +101,40 @@ Return JSON:
         const catalogProduct = await printful.resolveCatalogProductForKeyword(candidate.printfulSearchKeyword || "t-shirt");
         const logoUrl = await shopify.getStoreLogoUrl();
 
+        // Resolve the print design the same way the product agent does:
+        // ai → an OpenAI graphic (budget-gated), text → Archivo Black, else logo.
+        // Any generation failure falls back to the logo — never blocks creation.
+        let designUrl = logoUrl;
+        const dsgn = candidate.design || {};
+        if (dsgn.type === "ai" && dsgn.prompt && design.hasImageGen()) {
+          try {
+            const rendered = await design.generateGraphicDesign(dsgn.prompt);
+            designUrl = rendered.url;
+            log("action", `Inner loop generated AI graphic for "${candidate.suggestedTitle}" → ${rendered.url}`);
+          } catch (e) {
+            log("error", `Inner loop AI graphic failed for "${candidate.suggestedTitle}" (${e.message}) — using logo instead.`);
+          }
+        } else if (dsgn.type === "text" && dsgn.text) {
+          try {
+            const rendered = await design.renderTextDesign(dsgn.text, { color: dsgn.color });
+            designUrl = rendered.url;
+            log("action", `Inner loop rendered text design "${String(dsgn.text).replace(/\n/g, " / ")}" for "${candidate.suggestedTitle}"`);
+          } catch (e) {
+            log("error", `Inner loop text design failed for "${candidate.suggestedTitle}" (${e.message}) — using logo instead.`);
+          }
+        }
+
         const product = await printful.createProduct({
           title: candidate.suggestedTitle,
           description: `<p>${candidate.suggestedTitle}</p><p>Built for the ones who chose discipline. The Rival Is Me. #THERIVALISME</p>`,
           catalogProductId: catalogProduct.catalogProductId,
           variants: catalogProduct.variants,
           retailPrice: candidate.retailPrice || 34.99,
-          imageUrl: logoUrl,
+          imageUrl: designUrl,
         });
+
+        // Remember the design so fulfillment prints the same art the listing shows.
+        if (designUrl && designUrl !== logoUrl) design.saveProductDesign(product.id, designUrl);
 
         // Mark as created in memory
         candidate.created = true;
