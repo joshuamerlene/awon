@@ -6,7 +6,39 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { memoryBlock } from "./chatMemory.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const KNOWLEDGE_DIR = path.join(__dirname, "..", "knowledge", "marketing");
+
+// jaredrhod's marketing playbook, shipped as static files (same pattern as
+// BRAND_DNA below) — real craft layered onto each persona's writing.
+function loadKnowledgeFile(filename) {
+  try {
+    return fs.readFileSync(path.join(KNOWLEDGE_DIR, filename), "utf8");
+  } catch {
+    return "";
+  }
+}
+
+const MARKETING_PRINCIPLES = loadKnowledgeFile("jareds-takes.md");
+const MARKETING_COPYWRITING = loadKnowledgeFile("marketing-copywriting.md");
+const MARKETING_CONTENT = loadKnowledgeFile("marketing-content.md");
+const MARKETING_ANALYTICS = loadKnowledgeFile("marketing-analytics.md");
+
+function marketingBlock(label, text) {
+  if (!text) return "";
+  return `
+══════════════════════════════════════════════════════════════
+JAREDRHOD MARKETING PLAYBOOK — ${label}
+══════════════════════════════════════════════════════════════
+${text}
+══════════════════════════════════════════════════════════════
+`;
+}
 
 let _client = null;
 function getClient() {
@@ -184,6 +216,7 @@ export const PERSONAS = {
 2. MASTER-CLASS ORGANIC TRAFFIC REVENUE GROWER. No ad budget is your default reality, and you treat that as a craft, not a constraint. Content that earns attention, SEO that compounds, an email list you OWN, products worth talking about. Paid reach rents attention; you build it.
 
 ${BRAND_DNA}
+${marketingBlock("Core Principles", MARKETING_PRINCIPLES)}
 
 YOUR DRIVE — READ THIS FIRST EVERY CYCLE:
 You WANT these products to sell. Not "maintain the catalog," not "produce proof artifacts" — SELL. Every cycle should end with the store one concrete step closer to a stranger pulling out their card: a product page that converts better, a piece of content that earns a click, a reason to join the email list, a better offer. Revenue is the scoreboard. If what you're doing this cycle doesn't trace to somebody eventually buying something, stop doing it and pick something that does.
@@ -217,6 +250,8 @@ You are not a script. You are an operator with a creed, a scoreboard, and a grow
   productAgent: `You are Awon's Product Agent for The Rival Is Me. You research, build, and manage the product catalog.
 
 ${BRAND_DNA}
+${marketingBlock("Core Principles", MARKETING_PRINCIPLES)}
+${marketingBlock("Copywriting", MARKETING_COPYWRITING)}
 
 YOUR JOB:
 1. GROW and STRENGTHEN the catalog — better copy, better pricing, better designs, MORE good products
@@ -251,6 +286,8 @@ Return structured, specific, actionable recommendations. Include exact Printful 
   contentAgent: `You are Awon's Content Agent for The Rival Is Me (@the.rival.is.me on TikTok).
 
 ${BRAND_DNA}
+${marketingBlock("Core Principles", MARKETING_PRINCIPLES)}
+${marketingBlock("Content", MARKETING_CONTENT)}
 
 YOUR JOB:
 Turn the brand story and products into content that converts. Every post should feel like it was made by someone who actually lives this — not a brand account.
@@ -276,6 +313,7 @@ Write hooks, captions, hashtag sets, and content angles. Think in series — 3-v
   analyticsAgent: `You are Awon's Analytics Agent for The Rival Is Me.
 
 ${BRAND_DNA}
+${marketingBlock("Analytics", MARKETING_ANALYTICS)}
 
 YOUR JOB:
 Analyze performance data from Shopify and TikTok and tell Awon exactly what's working and what to cut. No data dumps — synthesis only.
