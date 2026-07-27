@@ -46,6 +46,25 @@ export async function runCycle() {
     log("decision", `Reading ${notes.length} note(s) Josh left: ${notes.map(n => `"${n.text}"`).join(" | ")}`);
   }
 
+  // ── Budget circuit breaker — a real hard stop, checked BEFORE anything in
+  // this cycle spends a cent. Every think() call costs money and is never
+  // individually blocked (core/claude.js recordSpendUnconditional — blocking
+  // an individual call could brick Awon mid-thought), so the actual stop has
+  // to happen here instead: if the budget cap is already used up, skip the
+  // entire cycle — no thinking, no outreach, no clip work, nothing spends.
+  // Uses a plain deterministic message, not an LLM call, on purpose: this has
+  // to work even when the budget is the exact reason nothing else can run.
+  if (ledger.getAvailable() <= 0) {
+    addBlockerOnce({
+      title: "Budget exhausted — Awon is paused",
+      context: `Available budget is $${ledger.getAvailable().toFixed(2)}. Every cycle costs real money to run (thinking, outreach, clip production), so cycles are skipped entirely — not throttled, fully paused — until funded again.`,
+      options: ["Add funds via the dashboard Budget panel"],
+      thread: "Once funded, the next scheduled cycle picks up normally — nothing queued is lost while paused.",
+    });
+    log("system", `=== Cycle skipped — budget exhausted ($${ledger.getAvailable().toFixed(2)} available). Add funds to resume. ===`);
+    return;
+  }
+
   // ── 1. Process resolved blockers ──────────────────────────────────────────
   for (const blocker of resolvedBlockers) {
     log("decision", `Processing resolved blocker: "${blocker.title}"`, { resolution: blocker.resolution });
