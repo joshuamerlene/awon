@@ -611,7 +611,23 @@ async function loadClients() {
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
           <span style="font-size:11px;${c.rightsAuthorized ? "color:var(--online);" : "color:#f59e0b;"}">${c.rightsAuthorized ? "✓ Rights authorized" : "⚠ Rights NOT authorized — footage won't be cut"}</span>
-          ${!c.rightsAuthorized ? `<button class="option-btn" onclick="authorizeRights('${c.id}')">Authorize Rights</button>` : ""}
+          <div style="display:flex;gap:6px;">
+            ${!c.rightsAuthorized ? `<button class="option-btn" onclick="authorizeRights('${c.id}')">Authorize Rights</button>` : ""}
+            <button class="option-btn" onclick="toggleEditDeal('${c.id}')">Edit Deal</button>
+          </div>
+        </div>
+        <div id="edit-deal-${c.id}" style="display:none;">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;">
+            <select class="note-input" style="min-height:auto;padding:8px 10px;font-size:11px;" id="edit-status-${c.id}">
+              ${["prospect","contacted","negotiating","active","churned"].map(s => `<option value="${s}" ${c.status === s ? "selected" : ""}>${s}</option>`).join("")}
+            </select>
+            <select class="note-input" style="min-height:auto;padding:8px 10px;font-size:11px;" id="edit-dealtype-${c.id}">
+              <option value="">Deal type</option>
+              ${["project","per-clip","retainer"].map(t => `<option value="${t}" ${c.dealType === t ? "selected" : ""}>${t}</option>`).join("")}
+            </select>
+            <input class="note-input" style="min-height:auto;padding:8px 10px;font-size:11px;" id="edit-rate-${c.id}" type="number" min="0" step="1" value="${c.rateUsd || ""}" placeholder="Rate $" />
+          </div>
+          <button class="resolve-btn" onclick="saveDeal('${c.id}')">Save</button>
         </div>
         <div style="display:flex;gap:6px;">
           <input class="note-input" style="min-height:auto;padding:8px 10px;font-size:11px;" id="footage-url-${c.id}" placeholder="Footage URL (Drive/YouTube/Dropbox link)" />
@@ -644,6 +660,28 @@ async function addClient() {
     document.getElementById("client-deal-input").value = "";
     loadClients();
   } catch(e) { alert("Failed to add client. Try again."); }
+}
+
+function toggleEditDeal(id) {
+  const el = document.getElementById(`edit-deal-${id}`);
+  el.style.display = el.style.display === "none" ? "block" : "none";
+}
+
+async function saveDeal(id) {
+  const body = {
+    status: document.getElementById(`edit-status-${id}`).value,
+    dealType: document.getElementById(`edit-dealtype-${id}`).value || null,
+    rateUsd: parseFloat(document.getElementById(`edit-rate-${id}`).value) || null,
+  };
+  try {
+    const res = await fetch(`/api/clients/${id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-dashboard-token": TOKEN },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error();
+    loadClients();
+  } catch(e) { alert("Failed to save deal terms. Try again."); }
 }
 
 async function authorizeRights(id) {
