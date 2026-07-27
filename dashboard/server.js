@@ -28,12 +28,11 @@ import { getAllBlockers, resolveBlocker, getPendingBlockers } from "../core/queu
 import { addNote, getAllNotes } from "../core/notes.js";
 import { handleChat } from "../core/chat.js";
 import { getChat, activeMemory, forget as forgetMemory } from "../core/chatMemory.js";
-import * as imageBudget from "../core/imageBudget.js";
 import { getLog, log } from "../core/logger.js";
 import { loadMemory } from "../core/memory.js";
 import { Ledger } from "../core/ledger.js";
-import { getContentQueue } from "../agents/content.js";
-import * as shopify from "../integrations/shopify.js";
+import * as clients from "../core/clients.js";
+import { getClipQueue, markClipDelivered } from "../agents/clipAgent.js";
 import * as video from "../integrations/video.js";
 import * as tiktok from "../integrations/tiktok.js";
 import { getReviewQueue, getReviewItem, updateReviewItem, isReviewMode } from "../core/reviewQueue.js";
@@ -76,8 +75,9 @@ export function startDashboard() {
         strategy: memory.strategy,
         nextActions: memory.nextActions,
         budget: ledger.getSummary(),
-        imageBudget: imageBudget.status(),
         pendingBlockers: pending.length,
+        clientCount: clients.getAllClients().length,
+        activeClientCount: clients.getActiveClients().length,
         tiktokConnected: !!process.env.TIKTOK_CONTENT_ACCESS_TOKEN,
         timestamp: new Date().toISOString(),
       });
@@ -170,39 +170,84 @@ export function startDashboard() {
     }
   });
 
-  // ── Budget ────────────────────────────────────────────────────────────────
-  // -- Backfill collections --
-  // One-time: drop every apparel product already live into the MERCH
-  // ("frontpage") collection so the storefront nav shows the full catalog, not
-  // just the 3 originals. Fire-and-forget (throttled) so the HTTP call returns
-  // immediately; progress lands in the activity log.
-  app.post("/api/backfill-collections", (req, res) => {
-    res.json({ ok: true, status: "started — check the activity log for results" });
-    (async () => {
-      try {
-        const col = await shopify.findCollectionByHandle("frontpage");
-        if (!col) {
-          log("system", "Backfill: 'frontpage' is not a custom collection (may be smart/auto) — cannot add via API. No change made.");
-          return;
-        }
-        const products = await shopify.getProducts();
-        const isApparel = (p) =>
-          /pod|pf_dropship/i.test(p.tags || "") ||
-          /shirt|tee\b|tank|hoodie|jogger|short|sweatshirt|long ?sleeve|\bhat\b|beanie|crewneck|apparel|gear/i.test(
-            `${p.product_type || ""} ${p.title || ""}`
-          );
-        const targets = products.filter(isApparel);
-        let added = 0, failed = 0;
-        for (const p of targets) {
-          try { await shopify.addProductToCollection(p.id, col.id); added++; }
-          catch { failed++; }
-          await new Promise((r) => setTimeout(r, 300)); // Shopify REST rate limit
-        }
-        log("action", `Backfill complete: added ${added}/${targets.length} apparel products to the MERCH collection (${failed} already-in/failed).`);
-      } catch (e) {
-        log("error", `Backfill collections failed: ${e.message}`);
-      }
-    })();
+  // ── Clients / pipeline ───────────────────────────────────────────────────
+  app.get("/api/clients", (req, res) => {
+    try {
+      res.json(clients.getAllClients());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Add a prospect/client. Prospect discovery isn't automated (no search API
+  // wired in) — this is how Josh feeds candidates in until that exists.
+  app.post("/api/clients", (req, res) => {
+    try {
+      const { name, contactEmail, sourceChannel, dealType, rateUsd, notes, status } = req.body || {};
+      if (!name) return res.status(400).json({ error: "name is required" });
+      const client = clients.addClient({ name, contactEmail, sourceChannel, dealType, rateUsd, notes, status });
+      res.json({ success: true, client });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/clients/:id", (req, res) => {
+    try {
+      const client = clients.updateClient(req.params.id, req.body || {});
+      res.json({ success: true, client });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Explicit rights authorization — required before any of this client's
+  // footage gets submitted for clipping. Confirming this is Josh's call.
+  app.post("/api/clients/:id/authorize-rights", (req, res) => {
+    try {
+      const client = clients.updateClient(req.params.id, { rightsAuthorized: true });
+      res.json({ success: true, client });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/clients/:id/footage", (req, res) => {
+    try {
+      const { url } = req.body || {};
+      if (!url) return res.status(400).json({ error: "url is required" });
+      const submission = clients.addFootageSubmission(req.params.id, { url });
+      res.json({ success: true, submission });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Clip delivery queue ──────────────────────────────────────────────────
+  app.get("/api/clips", (req, res) => {
+    try {
+      const queue = getClipQueue();
+      const status = req.query.status;
+      const items = status ? queue.filter((i) => i.status === status) : queue;
+      res.json({ total: items.length, items: items.reverse() });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/clips/:id/video", (req, res) => {
+    const item = getClipQueue().find((i) => i.id === req.params.id);
+    if (!item || !fs.existsSync(item.videoPath)) return res.status(404).json({ error: "Not found" });
+    res.sendFile(path.resolve(item.videoPath));
+  });
+
+  app.post("/api/clips/:id/mark-delivered", (req, res) => {
+    try {
+      markClipDelivered(req.params.id);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.post("/api/budget/add-funds", (req, res) => {
@@ -317,19 +362,9 @@ export function startDashboard() {
     }
   });
 
-  // ── Content Queue ─────────────────────────────────────────────────────────
-  app.get("/api/content-queue", (req, res) => {
-    try {
-      const queue = getContentQueue();
-      const status = req.query.status; // filter by ?status=pending|posted
-      const items = status ? queue.filter(i => i.status === status) : queue;
-      res.json({ total: items.length, items: items.reverse() }); // newest first
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
   // ── TikTok Review Queue (audit-compliant compose flow, /review.html) ──────
+  // Dormant unless Josh wires up TIKTOK_CONTENT_ACCESS_TOKEN for an optional
+  // portfolio/demo-reel channel — the business itself doesn't depend on it.
   app.get("/api/review", async (req, res) => {
     try {
       const items = getReviewQueue().filter(i => i.status === "pending");
@@ -399,17 +434,6 @@ export function startDashboard() {
     }
   });
 
-  // ── Archive All Products ──────────────────────────────────────────────────
-  // One-time nuclear option: archive all active products so Awon rebuilds from scratch.
-  app.post("/api/archive-all-products", async (req, res) => {
-    try {
-      const archived = await shopify.archiveAllProducts();
-      res.json({ success: true, count: archived.length, products: archived });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
   // ── TikTok OAuth (Login Kit v2 / Content Posting API) ───────────────────────
   // Kicks off the real OAuth consent flow to get TIKTOK_CONTENT_ACCESS_TOKEN for
   // @the.rival.is.me. Required even for unaudited posting — audit status only
@@ -474,49 +498,6 @@ export function startDashboard() {
           `<p>Awon is authorized to post to this TikTok account. Credentials are stored securely server-side and refresh automatically.</p>` +
           `<p>Scopes granted: ${tokenData.scope}</p>` +
           `<a href="/">Back to dashboard</a></div></body></html>`
-        );
-      } else {
-        res.send(`<h1>Token Exchange Error</h1><pre>${JSON.stringify(tokenData, null, 2)}</pre>`);
-      }
-    } catch (err) {
-      res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
-    }
-  });
-
-  // ── Shopify OAuth Callback ─────────────────────────────────────────────────
-  // Called by Shopify after store owner approves app install.
-  // Exchanges the one-time code for a permanent Admin API access token.
-  app.get("/auth/callback", async (req, res) => {
-    const { code, shop } = req.query;
-    if (!code || !shop) return res.status(400).send("Missing code or shop parameters.");
-
-    try {
-      const clientId = process.env.SHOPIFY_APP_CLIENT_ID;
-      const clientSecret = process.env.SHOPIFY_APP_CLIENT_SECRET;
-
-      if (!clientId || !clientSecret) {
-        // Fallback: display the code so it can be exchanged manually
-        return res.send(
-          `<h1>OAuth Code Received</h1><p><b>Shop:</b> ${shop}</p><p><b>Code:</b> <code>${code}</code></p>` +
-          `<p>Set SHOPIFY_APP_CLIENT_ID + SHOPIFY_APP_CLIENT_SECRET in Railway env vars, then reinstall.</p>`
-        );
-      }
-
-      const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code }),
-      });
-
-      const tokenData = await tokenRes.json();
-
-      if (tokenData.access_token) {
-        res.send(
-          `<h1>✅ Shopify Connected!</h1>` +
-          `<p><b>Access Token:</b> <code style="word-break:break-all">${tokenData.access_token}</code></p>` +
-          `<p><b>Scope:</b> ${tokenData.scope}</p>` +
-          `<p>Add <code>SHOPIFY_ADMIN_API_ACCESS_TOKEN=${tokenData.access_token}</code> and ` +
-          `<code>SHOPIFY_STORE_DOMAIN=${shop}</code> to Railway environment variables.</p>`
         );
       } else {
         res.send(`<h1>Token Exchange Error</h1><pre>${JSON.stringify(tokenData, null, 2)}</pre>`);

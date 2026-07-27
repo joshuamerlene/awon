@@ -1,47 +1,50 @@
 /**
  * agents/analytics.js — Analytics Sub-Agent
  *
- * Surfaces what's actually working. Awon runs this periodically
- * (not every cycle — only when there's enough data to analyze).
+ * Surfaces what's actually working across the client pipeline: prospecting,
+ * closing, delivery, and payout. Awon runs this periodically (not every
+ * cycle — only when there's enough data to analyze).
  */
 
 import { thinkJSON, PERSONAS } from "../core/claude.js";
 import { log } from "../core/logger.js";
+import * as clients from "../core/clients.js";
+import { getClipQueue } from "./clipAgent.js";
 
-export async function runAnalyticsAgent({ products, orders, videos, memory }) {
+export async function runAnalyticsAgent({ memory }) {
   log("sub-agent", "Analytics agent starting...");
+
+  const allClients = clients.getAllClients();
+  const clipQueue = getClipQueue();
 
   const result = await thinkJSON({
     system: PERSONAS.analyticsAgent,
-    prompt: `Analyze performance data and surface actionable insights.
+    prompt: `Analyze the client pipeline and surface actionable insights.
 
-Orders (${orders.length} total):
-${JSON.stringify(orders.slice(0, 20).map(o => ({
-  id: o.id,
-  revenue: o.total_price,
-  items: o.line_items?.map(i => ({ title: i.title, qty: i.quantity })),
-  date: o.created_at,
-  fulfillment: o.fulfillment_status,
+Clients (${allClients.length} total):
+${JSON.stringify(allClients.map(c => ({
+  name: c.name,
+  status: c.status,
+  sourceChannel: c.sourceChannel,
+  dealType: c.dealType,
+  rateUsd: c.rateUsd,
+  outreachCount: c.outreach?.length || 0,
+  invoiceCount: c.invoices?.length || 0,
+  invoicesPaid: (c.invoices || []).filter(i => i.status === "paid").length,
+  clipsDelivered: c.clipsDelivered || 0,
+  totalPaidUsd: c.totalPaidUsd || 0,
 })), null, 2)}
 
-TikTok videos performance:
-${videos.length > 0
-  ? JSON.stringify(videos.slice(0, 20).map(v => ({
-      id: v.id,
-      description: v.description?.slice(0, 100),
-      plays: v.statistics?.play_count,
-      likes: v.statistics?.like_count,
-      shares: v.statistics?.share_count,
-      comments: v.statistics?.comment_count,
-      duration: v.duration,
-    })), null, 2)
-  : "No TikTok data available yet."}
-
-Products:
-${JSON.stringify(products.slice(0, 20).map(p => ({ id: p.id, title: p.title, price: p.variants?.[0]?.price })), null, 2)}
+Clip delivery queue (${clipQueue.length} total):
+${JSON.stringify(clipQueue.slice(0, 20).map(c => ({
+  client: c.clientName,
+  status: c.status,
+  viralScore: c.viralScore,
+  queuedAt: c.queuedAt,
+})), null, 2)}
 
 Previous learnings:
-${memory.learnings.slice(0, 10).map(l => `- ${l.insight}`).join("\n") || "None yet."}
+${(memory.learnings || []).slice(0, 10).map(l => `- ${l.insight}`).join("\n") || "None yet."}
 
 Return JSON:
 {
@@ -49,9 +52,8 @@ Return JSON:
   "rankedInsights": [
     { "insight": "...", "action": "what Awon should do about it", "priority": "high|medium|low" }
   ],
-  "winnersToDoubleDown": ["product/video/format names"],
-  "losersToKill": ["product/video/format names"],
-  "audiencePattern": "what the data reveals about the audience",
+  "pipelineHealth": "one-sentence read on where prospects are getting stuck, if anywhere",
+  "bestClientProfile": "what the best-converting/best-paying clients have in common, if there's enough data yet",
   "recommendedFocus": "what the next 2 weeks should be optimized for"
 }`,
   });

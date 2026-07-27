@@ -24,16 +24,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MEMORY_PATH = path.join(__dirname, "..", "data", "memory.json");
 
 const DEFAULT_MEMORY = {
-  strategy: "Brand new. No data yet. First priority: get products live on TikTok Shop and Shopify, then drive organic traffic through existing workout footage.",
+  strategy: "Brand new. No clients yet. First priority: get real prospects into the pipeline (Josh adds candidates via the dashboard until a search integration exists), send real outreach, and close a first deal.",
   experiments: [],
   learnings: [],
-  products: [],
-  contentNotes: {
-    workingFormats: [],
-    workingHooks: [],
-    bestPostingTimes: [],
-    audienceInsights: [],
-  },
   subAgents: [],
   nextActions: [],
   cycleCount: 0,
@@ -101,7 +94,7 @@ function scrubStaleBeliefs(memory) {
   // memory.strategy and re-seeded every cycle's thinking. Reset it on sight.
   if (typeof memory.strategy === "string" && STALE_BELIEF_PATTERNS.some((rx) => rx.test(memory.strategy))) {
     memory.strategy =
-      "Sell. Make the store's products and presentation genuinely great, grow owned channels (email list first), and produce content that earns attention. No ultimatums — just work.";
+      "Close deals and deliver clips. Work the prospect pipeline, produce real work for active clients, get invoices out. No ultimatums — just work.";
   }
   if (Array.isArray(memory.learnings)) {
     memory.learnings = memory.learnings.filter((l) => {
