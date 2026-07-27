@@ -70,6 +70,7 @@ export function startDashboard() {
       const pending = getPendingBlockers();
       res.json({
         online: true,
+        businessName: process.env.BUSINESS_NAME || "Awon",
         lastCycle: memory.updatedAt,
         cycleCount: memory.cycleCount,
         strategy: memory.strategy,
