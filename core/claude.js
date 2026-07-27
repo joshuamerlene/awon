@@ -10,6 +10,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { memoryBlock } from "./chatMemory.js";
+import { Ledger } from "./ledger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const KNOWLEDGE_DIR = path.join(__dirname, "..", "knowledge", "marketing");
@@ -69,6 +70,49 @@ const MODELS = {
   fast: "claude-haiku-4-5-20251001",
 };
 
+// Real per-token pricing for the two models Awon actually calls, USD per
+// 1M tokens. This is what makes "baseline cost to operate" a real, tracked
+// number instead of an invisible line item — every think() call below
+// records its actual cost to the ledger, unconditionally (see
+// Ledger.recordSpendUnconditional — thinking must never be blocked by a
+// thin budget, that would brick the agent's ability to even report it).
+const PRICING_PER_MILLION_USD = {
+  "claude-sonnet-4-6": { input: 3.0, output: 15.0 },
+  "claude-haiku-4-5-20251001": { input: 1.0, output: 5.0 },
+};
+
+function estimateCostUsd(model, usage) {
+  const p = PRICING_PER_MILLION_USD[model];
+  if (!p || !usage) return 0;
+  const inputCost = ((usage.input_tokens || 0) / 1_000_000) * p.input;
+  const outputCost = ((usage.output_tokens || 0) / 1_000_000) * p.output;
+  // Cache tokens are priced differently (~1.25x input for writes, ~0.1x for
+  // reads) — Awon doesn't use cache_control yet so these are normally 0, but
+  // priced correctly in case that changes later.
+  const cacheWriteCost = ((usage.cache_creation_input_tokens || 0) / 1_000_000) * p.input * 1.25;
+  const cacheReadCost = ((usage.cache_read_input_tokens || 0) / 1_000_000) * p.input * 0.1;
+  return inputCost + outputCost + cacheWriteCost + cacheReadCost;
+}
+
+// Honest gap, not silently ignored: the hosted web_search tool has its own
+// per-call cost separate from token usage, and there's no confirmed current
+// price for it cached here — recording a guessed number would be worse than
+// recording nothing. Token cost from a web-search-enabled call IS tracked
+// (below); the search tool's own fee is not, and the transaction note says
+// so explicitly so this doesn't read as "fully tracked" when it isn't.
+function recordThinkingCost(model, usage, webSearch) {
+  try {
+    const cost = estimateCostUsd(model, usage);
+    if (cost <= 0) return;
+    const ledger = new Ledger();
+    ledger.recordSpendUnconditional(
+      cost,
+      "anthropic_api",
+      `${model} — ${usage.input_tokens || 0} in / ${usage.output_tokens || 0} out tokens${webSearch ? " (+ web search calls, fee not included — price unconfirmed)" : ""}`
+    );
+  } catch { /* cost tracking must never break the actual response */ }
+}
+
 /**
  * Web search — Anthropic's native hosted server-side tool. No separate
  * vendor/API key: it's a plain tool declaration on the Messages API. Pass
@@ -90,13 +134,15 @@ function webSearchTool() {
  * of the answer.
  */
 export async function think({ system, prompt, maxTokens = 4096, fast = false, webSearch = false }) {
+  const model = fast ? MODELS.fast : MODELS.strategic;
   const response = await getClient().messages.create({
-    model: fast ? MODELS.fast : MODELS.strategic,
+    model,
     max_tokens: maxTokens,
     system: withMemory(system),
     messages: [{ role: "user", content: prompt }],
     ...(webSearch ? { tools: [webSearchTool()] } : {}),
   });
+  recordThinkingCost(model, response.usage, webSearch);
   const textBlocks = response.content.filter((b) => b.type === "text");
   const block = textBlocks[textBlocks.length - 1];
   return block ? block.text.trim() : "";

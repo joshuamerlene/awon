@@ -86,6 +86,20 @@ export class Ledger {
   }
 
   /**
+   * For unavoidable baseline operating cost (the Anthropic API calls Awon's
+   * own thinking runs on) — never gated behind canSpend(), because refusing
+   * to think when the budget is thin would brick the agent's ability to even
+   * notice or report that. Available can go negative here; that's the honest
+   * signal that operating cost has outrun funding, not a bug to hide.
+   */
+  recordSpendUnconditional(amount, category, note = "") {
+    this.state.availableBudgetUsd -= amount;
+    this.state.cumulativeSpendUsd += amount;
+    this.state.transactions.push({ date: new Date().toISOString(), type: "spend", amount, category, note });
+    save(this.state);
+  }
+
+  /**
    * Josh manually topping up Awon's budget with real money he's putting in
    * (e.g. the monthly $10). This is separate from reinvested profit — it's
    * new money from outside the business.
