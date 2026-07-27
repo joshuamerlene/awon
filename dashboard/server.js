@@ -262,6 +262,17 @@ export function startDashboard() {
     }
   });
 
+  // Spend/revenue/funding history behind the summary numbers on /api/status.
+  app.get("/api/ledger", (req, res) => {
+    try {
+      const ledger = new Ledger();
+      const limit = Math.min(Number(req.query.limit || 50), 200);
+      res.json({ summary: ledger.getSummary(), transactions: ledger.getRecentTransactions(limit) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/budget/add-funds", (req, res) => {
     try {
       const amount = Number(req.body?.amount);

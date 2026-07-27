@@ -218,15 +218,9 @@
           <label>PAYOUT OWED</label>
           <div class="value small" id="budget-payout">—</div>
         </div>
-      </div>
-      <div id="image-budget-row" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
-        <label style="font-size:10px;color:var(--muted);letter-spacing:0.1em;display:block;margin-bottom:6px;">AI IMAGE BUDGET (THIS MONTH)</label>
-        <div style="display:flex;align-items:baseline;gap:8px;">
-          <span id="image-budget-spent" style="font-size:16px;font-weight:700;color:var(--accent);">—</span>
-          <span id="image-budget-meta" style="font-size:11px;color:var(--muted);"></span>
-        </div>
-        <div style="height:6px;background:var(--bg);border-radius:99px;margin-top:8px;overflow:hidden;">
-          <div id="image-budget-bar" style="height:100%;width:0%;background:var(--accent);border-radius:99px;transition:width .3s;"></div>
+        <div class="budget-item">
+          <label>TOTAL SPENT</label>
+          <div class="value small" id="budget-spent">—</div>
         </div>
       </div>
       <div class="budget-actions">
@@ -247,6 +241,16 @@
       </div>
       <div class="strategy-text" id="strategy-text">Loading...</div>
       <div class="next-actions" id="next-actions"></div>
+    </div>
+
+    <!-- Ledger / Spend History (full width) -->
+    <div class="panel blockers-panel">
+      <div class="panel-header">
+        <span class="panel-title">Spend &amp; Revenue History</span>
+      </div>
+      <div class="log-feed" id="ledger-container" style="max-height:300px;">
+        <div style="color:var(--muted);text-align:center;padding:20px;">Loading...</div>
+      </div>
     </div>
 
     <!-- Blockers (full width) -->
@@ -419,20 +423,11 @@ async function loadStatus() {
     document.getElementById("budget-adcap").textContent = `$${s.budget.adCapUsd}`;
     document.getElementById("budget-profit").textContent = `$${s.budget.cumulativeNetProfitUsd}`;
     document.getElementById("budget-payout").textContent = `$${s.budget.ownerPayoutOwedUsd}`;
+    document.getElementById("budget-spent").textContent = `$${s.budget.cumulativeSpendUsd ?? 0}`;
     document.getElementById("funded-total").textContent = `You've funded $${s.budget.cumulativeFundedUsd ?? 0} total`;
     document.getElementById("clear-payout-row").style.display = s.budget.ownerPayoutOwedUsd > 0 ? "flex" : "none";
     document.getElementById("strategy-text").textContent = s.strategy || "Initializing...";
     document.getElementById("tiktok-connect-link").style.display = s.tiktokConnected ? "none" : "inline-block";
-
-    if (s.imageBudget) {
-      const ib = s.imageBudget;
-      document.getElementById("image-budget-spent").textContent = `$${Number(ib.spentUsd).toFixed(2)} / $${Number(ib.capUsd).toFixed(2)}`;
-      document.getElementById("image-budget-meta").textContent = `${ib.count} image${ib.count === 1 ? "" : "s"} · $${Number(ib.remainingUsd).toFixed(2)} left`;
-      const pct = ib.capUsd > 0 ? Math.min(100, (ib.spentUsd / ib.capUsd) * 100) : 0;
-      const bar = document.getElementById("image-budget-bar");
-      bar.style.width = `${pct}%`;
-      bar.style.background = pct >= 100 ? "var(--red)" : "var(--accent)";
-    }
 
     const nextEl = document.getElementById("next-actions");
     nextEl.innerHTML = (s.nextActions || []).map(a => `<div class="next-action">→ ${a}</div>`).join("");
@@ -592,6 +587,31 @@ async function uploadFootage() {
     input.value = "";
     loadFootage();
   } catch(e) { alert("Upload failed. Try again — videos must be mp4/mov/m4v under 500MB, archives must be .zip."); }
+}
+
+const LEDGER_TYPE_LABEL = { spend: "SPEND", revenue: "REVENUE", funding: "FUNDED", payout_cleared: "PAYOUT" };
+const LEDGER_TYPE_CLASS = { spend: "error", revenue: "action", funding: "sub-agent", payout_cleared: "decision" };
+
+async function loadLedger() {
+  try {
+    const data = await apiFetch("/api/ledger?limit=50");
+    const container = document.getElementById("ledger-container");
+    if (!data.transactions || data.transactions.length === 0) {
+      container.innerHTML = `<div style="color:var(--muted);text-align:center;padding:20px;">No transactions yet.</div>`;
+      return;
+    }
+    container.innerHTML = data.transactions.map(t => {
+      const sign = t.type === "spend" ? "-" : (t.type === "revenue" || t.type === "funding" ? "+" : "");
+      return `
+        <div class="log-entry">
+          <span class="log-type ${LEDGER_TYPE_CLASS[t.type] || "system"}">${LEDGER_TYPE_LABEL[t.type] || t.type}</span>
+          <span class="log-message">${escapeHtml(t.note || t.category || "")}${t.category && t.note ? ` <span style="color:var(--muted);">(${escapeHtml(t.category)})</span>` : ""}</span>
+          <span class="log-time" style="margin-left:8px;color:${t.type === "spend" ? "var(--red)" : "var(--online)"};">${sign}$${Number(t.amount).toFixed(2)}</span>
+          <span class="log-time">${relativeTime(t.date)}</span>
+        </div>
+      `;
+    }).join("");
+  } catch(e) {}
 }
 
 async function loadClients() {
@@ -896,7 +916,7 @@ async function loadSandbox() {
 
 async function loadAll() {
   await loadStatus();
-  await Promise.all([loadBlockers(), loadChat(), loadMemory(), loadLog(), loadSandbox(), loadFootage(), loadClients(), loadClips()]);
+  await Promise.all([loadBlockers(), loadChat(), loadMemory(), loadLog(), loadSandbox(), loadFootage(), loadClients(), loadClips(), loadLedger()]);
 }
 
 // Enter sends the chat message (Shift+Enter for a newline)

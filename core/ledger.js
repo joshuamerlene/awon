@@ -124,6 +124,11 @@ export class Ledger {
     save(this.state);
   }
 
+  /** Most recent transactions first — the actual spend/revenue/funding history behind the summary numbers. */
+  getRecentTransactions(limit = 50) {
+    return this.state.transactions.slice(-limit).reverse();
+  }
+
   getSummary() {
     return {
       availableBudgetUsd: +this.state.availableBudgetUsd.toFixed(2),
