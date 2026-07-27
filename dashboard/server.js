@@ -15,6 +15,8 @@
  *   GET  /auth/tiktok/callback   — exchanges code for TIKTOK_CONTENT_ACCESS_TOKEN
  *   GET  /api/footage            — list raw footage Josh has uploaded
  *   POST /api/footage/upload     — Josh uploads raw video files for Awon to edit
+ *   GET  /api/public/status      — unauthenticated: free-trial slot status for awonvideo.com
+ *   POST /api/public/intake      — unauthenticated: the site's "Send Your Video" form lands here
  */
 
 import express from "express";
@@ -24,7 +26,7 @@ import os from "os";
 import { fileURLToPath } from "url";
 import multer from "multer";
 import unzipper from "unzipper";
-import { getAllBlockers, resolveBlocker, getPendingBlockers } from "../core/queue.js";
+import { getAllBlockers, resolveBlocker, getPendingBlockers, addBlockerOnce } from "../core/queue.js";
 import { addNote, getAllNotes } from "../core/notes.js";
 import { handleChat } from "../core/chat.js";
 import { getChat, activeMemory, forget as forgetMemory } from "../core/chatMemory.js";
@@ -32,10 +34,21 @@ import { getLog, log } from "../core/logger.js";
 import { loadMemory } from "../core/memory.js";
 import { Ledger } from "../core/ledger.js";
 import * as clients from "../core/clients.js";
+import * as freeTrial from "../core/freeTrial.js";
 import { getClipQueue, markClipDelivered, rejectClip } from "../agents/clipAgent.js";
 import * as video from "../integrations/video.js";
 import * as tiktok from "../integrations/tiktok.js";
 import { getReviewQueue, getReviewItem, updateReviewItem, isReviewMode } from "../core/reviewQueue.js";
+
+// Origins allowed to call the unauthenticated /api/public/* routes from a
+// browser. The Netlify preview URL stays here as a fallback even after the
+// custom domain is wired, since it costs nothing to leave it and saves a
+// redeploy if the domain ever needs to be re-pointed.
+const PUBLIC_SITE_ORIGINS = [
+  "https://awonvideo.com",
+  "https://www.awonvideo.com",
+  "https://cozy-babka-5c01ef.netlify.app",
+];
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -51,16 +64,95 @@ export function startDashboard() {
   // pull the files. Served from the persistent Volume.
   app.use("/designs", express.static(path.join(__dirname, "..", "data", "designs")));
 
+  // CORS for the public marketing site (awonvideo.com) hitting /api/public/*
+  // from a browser. Scoped to an explicit origin allowlist, not wide open —
+  // this is the only part of the API a stranger's browser ever touches.
+  app.use((req, res, next) => {
+    if (!req.path.startsWith("/api/public")) return next();
+    const origin = req.headers.origin;
+    if (PUBLIC_SITE_ORIGINS.includes(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    }
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+  });
+
   // Simple auth middleware
   function auth(req, res, next) {
     const token = req.headers["x-dashboard-token"] || req.query.token;
     if (token === DASHBOARD_PASSWORD) return next();
     // Allow unauthenticated access to the HTML shell (auth happens client-side)
     if (req.path === "/" || req.path.endsWith(".html") || !req.path.startsWith("/api")) return next();
+    // The public site's own routes are meant to be hit with no token at all —
+    // that's the whole point of them (see PUBLIC_SITE_ORIGINS / CORS above).
+    if (req.path.startsWith("/api/public")) return next();
     res.status(401).json({ error: "Unauthorized. Pass ?token=<DASHBOARD_PASSWORD> or X-Dashboard-Token header." });
   }
 
   app.use(auth);
+
+  // ── Public site intake (awonvideo.com "Send Your Video" form) ─────────────
+  // Unauthenticated on purpose — see CORS block above. Kept minimal: this
+  // never returns internal state (budget, strategy, memory), only the one
+  // thing the site needs to decide which copy to show.
+  app.get("/api/public/status", (req, res) => {
+    try {
+      res.json({ freeTrial: freeTrial.getFreeTrialStatus() });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/public/intake", (req, res) => {
+    try {
+      const { name, email, company, footageLink, message, consent } = req.body || {};
+      if (!name || !String(name).trim()) return res.status(400).json({ error: "name is required" });
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: "a valid email is required" });
+      if (footageLink && !consent) {
+        return res.status(400).json({ error: "consent is required when submitting a footage link" });
+      }
+
+      const trialStatusBefore = freeTrial.getFreeTrialStatus();
+      const usingFreeTrial = trialStatusBefore.open;
+
+      const notesParts = [`Submitted via awonvideo.com public intake form.`];
+      if (company) notesParts.push(`Channel/company: ${company}`);
+      if (message) notesParts.push(`Message: ${message}`);
+
+      const client = clients.addClient({
+        name,
+        contactEmail: email,
+        sourceChannel: usingFreeTrial ? freeTrial.FREE_TRIAL_SOURCE : "website",
+        notes: notesParts.join(" "),
+      });
+
+      let rightsAutoAuthorized = false;
+      if (footageLink && consent) {
+        clients.addFootageSubmission(client.id, { url: footageLink });
+        clients.updateClient(client.id, {
+          rightsAuthorized: true,
+          notes: `${client.notes} Rights auto-authorized: footage submitted directly via the public site's intake form with the consent box checked.`,
+        });
+        rightsAutoAuthorized = true;
+        log("action", `New client "${name}" (${email}) submitted footage directly via the site — rights auto-authorized, queued for Vizard.`);
+      } else {
+        log("action", `New prospect "${name}" (${email}) reached out via the site with no footage yet.`);
+      }
+
+      if (usingFreeTrial) freeTrial.checkAndFlagIfJustFilled();
+
+      res.json({
+        success: true,
+        hadFootage: !!footageLink,
+        rightsAutoAuthorized,
+        freeTrial: usingFreeTrial,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // ── Status ────────────────────────────────────────────────────────────────
   app.get("/api/status", (req, res) => {
@@ -79,6 +171,7 @@ export function startDashboard() {
         pendingBlockers: pending.length,
         clientCount: clients.getAllClients().length,
         activeClientCount: clients.getActiveClients().length,
+        freeTrial: freeTrial.getFreeTrialStatus(),
         tiktokConnected: !!process.env.TIKTOK_CONTENT_ACCESS_TOKEN,
         timestamp: new Date().toISOString(),
       });
