@@ -3,7 +3,7 @@
  *
  * Real workflow for a client-footage clipping business:
  *   1. Client shares a URL to their raw long-form footage (a Drive/YouTube/
- *      Dropbox link) — stored on their client record via core/clients.js.
+ *      link) — stored on their client record via core/clients.js.
  *      Vizard fetches the video server-side; we never host multi-GB files.
  *   2. Submit queued footage to Vizard (rights-gated — see below), which
  *      finds highlight moments itself and scores them.
@@ -34,10 +34,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QUEUE_PATH = path.join(__dirname, "../data/clip_queue.json");
 const DOWNLOAD_DIR = path.join(__dirname, "../data/vizard-clips");
 
-// Placeholder — Vizard's real per-project cost isn't confirmed yet (no
-// account exists). Josh: correct this once you have real pricing in front
-// of you (VIZARD_COST_PER_SUBMISSION_USD env var). Wrong-but-present beats
-// absent — this at least stops an unbounded bill by default.
+// NOT a real per-submission charge — confirmed from Vizard's own docs
+// (2026-07-27): Vizard bills against monthly plan minutes (Creator/Business
+// tier), consumption-based, not a fee per API call. This number is a rough
+// internal safety cap only, so submissions still show up in the ledger and
+// something stops an unbounded flood of requests — it does not reflect what
+// Josh's Vizard invoice will actually say. The real signal to watch is a
+// Vizard error code 4007 (account out of plan minutes), which raises its
+// own distinct blocker below — that's the one that actually means "pay
+// Vizard," not this number.
 const VIZARD_COST_PER_SUBMISSION_USD = Number(process.env.VIZARD_COST_PER_SUBMISSION_USD || 2);
 
 function loadQueue() {
@@ -133,6 +138,17 @@ export async function runClipAgent({ memory, ledger }) {
       log("action", `Submitted footage from "${footage.clientName}" to Vizard (project ${projectId}).`);
     } catch (err) {
       log("error", `Vizard submit failed for "${footage.clientName}": ${err.message}`);
+      if (err.vizardCode === 4007) {
+        // This is Vizard's OWN account running out of plan minutes — a
+        // completely different fix (pay Vizard) than Awon's internal budget
+        // being low. Don't let it get lost in the generic error log.
+        addBlockerOnce({
+          title: "Vizard account is out of plan minutes",
+          context: `Vizard rejected a submission for "${footage.clientName}" with error 4007 — the Vizard account itself is out of consumption for this billing period, separate from Awon's own budget ledger. This needs a top-up or plan upgrade directly on vizard.ai.`,
+          options: ["I've upgraded/topped up the Vizard plan"],
+          thread: "Once Vizard's own account has capacity again, queued footage submits automatically.",
+        });
+      }
     }
   }
 

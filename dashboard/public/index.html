@@ -650,7 +650,7 @@ async function loadClients() {
           <button class="resolve-btn" onclick="saveDeal('${c.id}')">Save</button>
         </div>
         <div style="display:flex;gap:6px;">
-          <input class="note-input" style="min-height:auto;padding:8px 10px;font-size:11px;" id="footage-url-${c.id}" placeholder="Footage URL (Drive/YouTube/Dropbox link)" />
+          <input class="note-input" style="min-height:auto;padding:8px 10px;font-size:11px;" id="footage-url-${c.id}" placeholder="Footage URL (YouTube or Google Drive link — not Dropbox, Vizard doesn't support it)" />
           <button class="option-btn" onclick="addFootageUrl('${c.id}')" style="white-space:nowrap;">Add Footage</button>
         </div>
       </div>

@@ -110,7 +110,7 @@ export function markInvoicePaid(invoiceId, amountPaidUsd) {
   return null;
 }
 
-/** Add a footage URL the client has shared (a Drive/YouTube/Dropbox link to raw long-form footage). */
+/** Add a footage URL the client has shared (a YouTube or Google Drive link — Vizard does not support Dropbox as a source). */
 export function addFootageSubmission(clientId, { url }) {
   const clients = load();
   const client = clients.find((c) => c.id === clientId);
