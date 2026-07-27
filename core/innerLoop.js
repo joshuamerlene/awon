@@ -68,7 +68,7 @@ const ACTIONS = {
   },
 
   audit_prospect_pipeline: {
-    description: "Review every prospect for missing contact info or staleness (contacted long ago with no follow-up), and flag anything Josh needs to act on. Does NOT discover new prospects — no search API is wired in yet.",
+    description: "Review every prospect for missing contact info or staleness (contacted long ago with no follow-up), and flag anything Josh needs to act on. Prospect discovery itself runs inside the outreach agent (live web search), not here.",
     async execute() {
       const all = clients.getAllClients();
       const missingContact = all.filter((c) => c.status === "prospect" && !c.contactEmail);

@@ -1,37 +1,91 @@
 /**
  * agents/outreach.js — Outreach Agent
  *
- * IMPORTANT HONEST LIMITATION: this agent does NOT discover brand-new
- * prospects out of thin air. Claude has no live web-search tool wired into
- * this server process (that's a Claude Code-only capability, not part of the
- * plain Anthropic API this repo calls) — so it never invents prospect names
- * from training data, which would just be hallucination wearing a
- * "research" label. Real autonomous lead discovery needs a real search API
- * (e.g. Serper.dev, Google Custom Search) wired into a future
- * integrations/search.js — that needs an API key Josh sets up, same
- * login-gated category as everything else external. Until then, prospects
- * come from clients.addClient() — added by Josh via the dashboard, or by a
- * future search integration once it exists.
+ * Prospect discovery uses Anthropic's native hosted web_search tool
+ * (core/claude.js `webSearch: true`) — a real Messages API tool, not a
+ * separate vendor integration or API key. This is what keeps discovery
+ * honest: candidates are grounded in actual search results Claude read this
+ * cycle, not invented from training data. Discovery only runs when the
+ * prospect pipeline is thin (see MIN_UNCONTACTED_PROSPECTS below) so it
+ * doesn't burn search calls every cycle once there's a real backlog.
  *
- * What this agent DOES do autonomously: draft real, specific outreach copy
- * for prospects already in the system, and send it once contact info and
- * RESEND_API_KEY are configured.
+ * What this agent does autonomously end to end: find real candidates via
+ * live search, add them to the pipeline, draft real specific outreach copy,
+ * and send it once contact info and RESEND_API_KEY are configured.
  */
 
-import { think, PERSONAS } from "../core/claude.js";
+import { think, thinkJSON, PERSONAS } from "../core/claude.js";
 import { log } from "../core/logger.js";
 import * as clients from "../core/clients.js";
 import * as email from "../integrations/email.js";
 
+const MIN_UNCONTACTED_PROSPECTS = 3;
+
+async function discoverProspects({ memory }) {
+  const existingNames = clients.getAllClients().map((c) => c.name);
+
+  const result = await thinkJSON({
+    system: PERSONAS.outreachAgent,
+    prompt: `Search the web right now to find 2-4 REAL, SPECIFIC prospect candidates for the clip production business — actual creators/streamers/podcasters/brands, not generic categories.
+
+Already in the pipeline (don't repeat these): ${existingNames.join(", ") || "none yet"}
+
+Search for candidates matching the "good prospect" criteria from your persona: real regular long-form content cadence, real audience size signal, no visible dedicated short-form/clips presence. Look for a real contact path too (a business email listed in their channel/podcast "about" page or bio is common — note it if you find one, otherwise leave contactEmail null).
+
+Return JSON:
+{
+  "candidates": [
+    {
+      "name": "the real creator/show/brand name you found",
+      "sourceChannel": "where you found them, e.g. \\"YouTube search\\", \\"podcast directory\\"",
+      "signal": "the specific real detail that made them a candidate — reference what you actually found",
+      "contactEmail": "an actual email you found, or null",
+      "notes": "1-2 sentences a human could verify — what they publish, roughly how often, why no clips presence yet"
+    }
+  ]
+}
+
+Only include candidates you actually found via search this turn — never fabricate a name, a stat, or an email. If search doesn't turn up anything solid, return an empty candidates array rather than inventing one.`,
+    webSearch: true,
+    fast: false,
+  });
+
+  let added = 0;
+  for (const candidate of result.candidates || []) {
+    if (!candidate.name || existingNames.includes(candidate.name)) continue;
+    clients.addClient({
+      name: candidate.name,
+      contactEmail: candidate.contactEmail || null,
+      sourceChannel: candidate.sourceChannel || "web-search",
+      notes: `${candidate.signal || ""} ${candidate.notes || ""}`.trim(),
+    });
+    added++;
+    log("action", `Discovered prospect via web search: "${candidate.name}" (${candidate.sourceChannel || "web"}).`);
+  }
+  return added;
+}
+
 export async function runOutreachAgent({ memory }) {
   log("sub-agent", "Outreach agent starting...");
+
+  let discovered = 0;
+  const uncontactedCount = clients.getProspects().filter((p) => (p.outreach || []).length === 0).length;
+  if (uncontactedCount < MIN_UNCONTACTED_PROSPECTS) {
+    try {
+      discovered = await discoverProspects({ memory });
+    } catch (err) {
+      log("error", `Prospect discovery failed: ${err.message}`);
+    }
+  }
 
   const prospects = clients.getProspects().filter((p) => (p.outreach || []).length === 0);
 
   if (prospects.length === 0) {
-    const msg = "No new prospects waiting on first contact. Prospect discovery isn't automated yet (no search API wired in) — add candidates via the dashboard, or wire integrations/search.js once an API key exists.";
+    const msg = discovered === 0
+      ? "No new prospects waiting on first contact, and this cycle's web search turned up nothing solid enough to add. Will try again next cycle, or add candidates via the dashboard."
+      : `Discovered ${discovered} new prospect(s) this cycle but none are ready for outreach yet.`;
     log("sub-agent", `Outreach agent: ${msg}`);
-    return { summary: msg, drafted: 0, sent: 0 };
+    return { summary: msg, discovered, drafted: 0, sent: 0 };
   }
 
   let drafted = 0, sent = 0;
@@ -72,7 +126,7 @@ Return ONLY the HTML email body. No subject line, no commentary.`,
     }
   }
 
-  const summary = `${drafted} outreach draft(s) written, ${sent} actually sent.`;
+  const summary = `${discovered} new prospect(s) discovered, ${drafted} outreach draft(s) written, ${sent} actually sent.`;
   log("sub-agent", `Outreach agent done. ${summary}`);
-  return { summary, drafted, sent };
+  return { summary, discovered, drafted, sent };
 }

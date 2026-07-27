@@ -70,16 +70,35 @@ const MODELS = {
 };
 
 /**
- * Core AI call. Returns raw text.
+ * Web search — Anthropic's native hosted server-side tool. No separate
+ * vendor/API key: it's a plain tool declaration on the Messages API. Pass
+ * `webSearch: true` to think()/thinkJSON() to let the model search live
+ * instead of answering from training data — this is what makes real
+ * prospect discovery (vs. hallucinated "research") possible.
  */
-export async function think({ system, prompt, maxTokens = 4096, fast = false }) {
+function webSearchTool() {
+  return { type: "web_search_20260209", name: "web_search", max_uses: 5 };
+}
+
+/**
+ * Core AI call. Returns raw text.
+ *
+ * With webSearch on, the response can interleave server_tool_use /
+ * web_search_tool_result blocks with multiple text blocks (preamble before
+ * a search, then the real answer after) — take the LAST text block, not the
+ * first, or a search-triggering call returns the pre-search preamble instead
+ * of the answer.
+ */
+export async function think({ system, prompt, maxTokens = 4096, fast = false, webSearch = false }) {
   const response = await getClient().messages.create({
     model: fast ? MODELS.fast : MODELS.strategic,
     max_tokens: maxTokens,
     system: withMemory(system),
     messages: [{ role: "user", content: prompt }],
+    ...(webSearch ? { tools: [webSearchTool()] } : {}),
   });
-  const block = response.content.find((b) => b.type === "text");
+  const textBlocks = response.content.filter((b) => b.type === "text");
+  const block = textBlocks[textBlocks.length - 1];
   return block ? block.text.trim() : "";
 }
 
@@ -106,9 +125,9 @@ function parseLooseJSON(raw) {
   }
 }
 
-export async function thinkJSON({ system, prompt, maxTokens = 4096, fast = false }) {
-  const baseSystem = `${system}\n\nIMPORTANT: Respond with ONLY valid JSON. No markdown, no explanation outside the JSON object. Every double-quote INSIDE a string value must be escaped as \\".`;
-  let raw = await think({ system: baseSystem, prompt, maxTokens, fast });
+export async function thinkJSON({ system, prompt, maxTokens = 4096, fast = false, webSearch = false }) {
+  const baseSystem = `${system}\n\nIMPORTANT: Respond with ONLY valid JSON. No markdown, no explanation outside the JSON object. Every double-quote INSIDE a string value must be escaped as \\".${webSearch ? " Do any web searches you need FIRST, then return only the final JSON — no prose before or after it." : ""}`;
+  let raw = await think({ system: baseSystem, prompt, maxTokens, fast, webSearch });
   try {
     return parseLooseJSON(raw);
   } catch (e1) {
@@ -119,6 +138,7 @@ export async function thinkJSON({ system, prompt, maxTokens = 4096, fast = false
       prompt,
       maxTokens,
       fast,
+      webSearch,
     });
     return parseLooseJSON(raw);
   }
