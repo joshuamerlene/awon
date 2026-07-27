@@ -15,7 +15,7 @@
 import { thinkJSON, think, PERSONAS } from "./claude.js";
 import { Ledger } from "./ledger.js";
 import { loadMemory, saveMemory, addLearning } from "./memory.js";
-import { getPendingBlockers, getResolvedBlockers, markProcessed } from "./queue.js";
+import { getPendingBlockers, getResolvedBlockers, markProcessed, addBlockerOnce } from "./queue.js";
 import { getUnconsumedNotes, markConsumed as markNoteConsumed } from "./notes.js";
 import { pruneExpired } from "./chatMemory.js";
 import { log } from "./logger.js";
@@ -76,6 +76,28 @@ Describe in plain text what you will do now to continue this thread, given his i
   const processingFootage = clients.getFootageByStatus("processing");
 
   log("action", `Pipeline: ${allClients.length} client(s) total — ${prospects.length} prospect(s), ${activeClients.length} active. Footage: ${queuedFootage.length} queued, ${processingFootage.length} processing.`);
+
+  // ── 2b. Time-box checkpoint ─────────────────────────────────────────────
+  // This is the direct lesson from this business's predecessor (The Rival Is
+  // Me apparel store): it ran 4 months to $0 revenue before the pattern got
+  // acted on. Don't let that repeat quietly — surface it as a real blocker,
+  // not a vault note nobody reads mid-cycle.
+  if (!memory.businessLaunchedAt) memory.businessLaunchedAt = new Date().toISOString();
+  const CHECKPOINT_WEEKS = Number(process.env.CHECKPOINT_WEEKS || 6);
+  const weeksSinceLaunch = (Date.now() - new Date(memory.businessLaunchedAt).getTime()) / (7 * 24 * 3600 * 1000);
+  const daysSinceLastCheckpointFlag = memory.lastCheckpointFlagAt
+    ? (Date.now() - new Date(memory.lastCheckpointFlagAt).getTime()) / (24 * 3600 * 1000)
+    : Infinity;
+  if (weeksSinceLaunch >= CHECKPOINT_WEEKS && activeClients.length === 0 && daysSinceLastCheckpointFlag >= 7) {
+    addBlockerOnce({
+      title: `Time-box checkpoint: ${CHECKPOINT_WEEKS}+ weeks in, zero active clients`,
+      context: `Launched ${memory.businessLaunchedAt}. Same checkpoint logic the vault note for this business named up front, now enforced in code instead of hoping someone remembers to check: this business's predecessor ran 4 months to $0 revenue before anyone acted on the pattern. Prospects contacted so far: ${prospects.filter(p => (p.outreach || []).length > 0).length}. Worth a real look at whether the approach needs to change (different prospecting channel, pricing, positioning) rather than continuing to wait.`,
+      options: ["Keep going as-is — give it more time", "Something needs to change — let's revisit the approach", "Pause this and reassess"],
+      thread: "Whatever Josh decides here becomes the new strategy going forward.",
+    });
+    memory.lastCheckpointFlagAt = new Date().toISOString();
+    log("decision", `Time-box checkpoint flagged — ${weeksSinceLaunch.toFixed(1)} weeks in, still zero active clients.`);
+  }
 
   // ── 3. Strategic decision — what does Awon focus on this cycle? ───────────
   const cycleCount = (memory.cycleCount || 0) + 1;
@@ -167,7 +189,7 @@ Reply to Josh directly, in 1-3 sentences, plain text. Tell him what you're actua
 
   if (strategy.runClipAgent) {
     try {
-      clipResult = await runClipAgent({ memory });
+      clipResult = await runClipAgent({ memory, ledger });
       log("sub-agent", "Clip agent completed", { summary: clipResult?.summary });
     } catch (err) {
       log("error", `Clip agent failed: ${err.message}`);

@@ -21,6 +21,8 @@
 
 import { thinkJSON, PERSONAS } from "../core/claude.js";
 import { log } from "../core/logger.js";
+import { loadMemory, saveMemory, addLearning } from "../core/memory.js";
+import { addBlockerOnce } from "../core/queue.js";
 import * as vizard from "../integrations/vizard.js";
 import * as video from "../integrations/video.js";
 import * as clients from "../core/clients.js";
@@ -31,6 +33,12 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QUEUE_PATH = path.join(__dirname, "../data/clip_queue.json");
 const DOWNLOAD_DIR = path.join(__dirname, "../data/vizard-clips");
+
+// Placeholder — Vizard's real per-project cost isn't confirmed yet (no
+// account exists). Josh: correct this once you have real pricing in front
+// of you (VIZARD_COST_PER_SUBMISSION_USD env var). Wrong-but-present beats
+// absent — this at least stops an unbounded bill by default.
+const VIZARD_COST_PER_SUBMISSION_USD = Number(process.env.VIZARD_COST_PER_SUBMISSION_USD || 2);
 
 function loadQueue() {
   try {
@@ -49,6 +57,27 @@ export function getClipQueue() {
   return loadQueue();
 }
 
+/**
+ * Josh reviews every clip before it reaches a client (see /review flow in the
+ * dashboard) — this captures WHY he rejected one so the curation prompt below
+ * can actually learn from it, instead of the same mistake repeating silently.
+ */
+export function rejectClip(id, reason) {
+  const queue = loadQueue();
+  const item = queue.find((i) => i.id === id);
+  if (!item) throw new Error(`Clip ${id} not found in queue.`);
+  item.status = "rejected";
+  item.rejectedAt = new Date().toISOString();
+  item.rejectionReason = reason || null;
+  saveQueue(queue);
+  if (reason) {
+    const memory = loadMemory();
+    addLearning(memory, `Clip rejected for "${item.clientName}" (caption: "${(item.caption || "").slice(0, 80)}"): ${reason}`);
+    saveMemory(memory);
+  }
+  return item;
+}
+
 export function markClipDelivered(id) {
   const queue = loadQueue();
   const item = queue.find((i) => i.id === id);
@@ -62,12 +91,14 @@ export function markClipDelivered(id) {
   }
 }
 
-export async function runClipAgent({ memory }) {
+export async function runClipAgent({ memory, ledger }) {
   log("sub-agent", "Clip agent starting...");
 
   let submitted = 0, polled = 0, delivered = 0;
 
   // ── 1. Submit queued, rights-cleared footage to Vizard ──────────────────
+  // Every submission costs real money — gated through the same ledger every
+  // other spend in this app goes through, not a bare API call with no cap.
   const queuedFootage = clients.getFootageByStatus("queued");
   for (const footage of queuedFootage) {
     if (!footage.rightsAuthorized) {
@@ -78,12 +109,26 @@ export async function runClipAgent({ memory }) {
       log("system", "VIZARD_API_KEY not set — footage stays queued until it's configured.");
       break;
     }
+    if (ledger) {
+      const check = ledger.canSpend(VIZARD_COST_PER_SUBMISSION_USD, "vizard_clipping");
+      if (!check.allowed) {
+        addBlockerOnce({
+          title: "Budget too low to submit footage to Vizard",
+          context: `Next footage submission (~$${VIZARD_COST_PER_SUBMISSION_USD}) would exceed the available budget: ${check.reason}`,
+          options: ["Add funds via the dashboard Budget panel"],
+          thread: "Once funded, queued footage submits automatically — nothing is lost, it just waits.",
+        });
+        log("decision", `Vizard submission for "${footage.clientName}" skipped — budget check failed: ${check.reason}`);
+        continue;
+      }
+    }
     try {
       const { projectId } = await vizard.submitVideoForClipping({
         videoUrl: footage.url,
         projectName: `${footage.clientName} — ${footage.id}`,
       });
       clients.updateFootageSubmission(footage.clientId, footage.id, { status: "processing", vizardProjectId: projectId });
+      if (ledger) ledger.recordSpend(VIZARD_COST_PER_SUBMISSION_USD, "vizard_clipping", `Footage submission for ${footage.clientName}`);
       submitted++;
       log("action", `Submitted footage from "${footage.clientName}" to Vizard (project ${projectId}).`);
     } catch (err) {
@@ -108,10 +153,19 @@ export async function runClipAgent({ memory }) {
 
       // Let the clip agent decide which detected moments are actually worth
       // delivering and write the caption/hook/hashtags for each, in the
-      // client's own voice.
+      // client's own voice. Ground it in what Josh has actually rejected
+      // before — a real feedback loop, not the same mistake repeating.
+      const clipRejectionLearnings = (memory.learnings || [])
+        .map(l => (typeof l === "string" ? l : l.insight))
+        .filter(Boolean)
+        .filter(l => l.includes("Clip rejected"))
+        .slice(0, 5);
+
       const decision = await thinkJSON({
         system: PERSONAS.clipAgent,
         prompt: `Vizard detected these highlight candidates from ${footage.clientName}'s footage. Decide which are actually worth delivering as finished clips, and write the delivery copy for each.
+
+Josh's past clip rejections (avoid repeating whatever pattern got these rejected): ${clipRejectionLearnings.join(" | ") || "none yet — no rejections on file"}
 
 Candidates (sorted by Vizard's own viral score, 0-10):
 ${JSON.stringify(result.videos.map(v => ({

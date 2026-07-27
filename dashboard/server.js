@@ -32,7 +32,7 @@ import { getLog, log } from "../core/logger.js";
 import { loadMemory } from "../core/memory.js";
 import { Ledger } from "../core/ledger.js";
 import * as clients from "../core/clients.js";
-import { getClipQueue, markClipDelivered } from "../agents/clipAgent.js";
+import { getClipQueue, markClipDelivered, rejectClip } from "../agents/clipAgent.js";
 import * as video from "../integrations/video.js";
 import * as tiktok from "../integrations/tiktok.js";
 import { getReviewQueue, getReviewItem, updateReviewItem, isReviewMode } from "../core/reviewQueue.js";
@@ -246,6 +246,17 @@ export function startDashboard() {
     try {
       markClipDelivered(req.params.id);
       res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Rejecting with a reason feeds the clip agent's next curation pass —
+  // a real feedback loop, not a silent discard.
+  app.post("/api/clips/:id/reject", (req, res) => {
+    try {
+      const item = rejectClip(req.params.id, req.body?.reason);
+      res.json({ success: true, item });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

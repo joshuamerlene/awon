@@ -726,6 +726,7 @@ async function loadClips() {
         <div style="display:flex;gap:8px;">
           <a class="option-btn" style="text-decoration:none;" href="/api/clips/${c.id}/video?token=${encodeURIComponent(TOKEN)}" target="_blank">Preview</a>
           ${c.status === "pending" ? `<button class="option-btn" onclick="markClipDelivered('${c.id}')">Mark Delivered</button>` : ""}
+          ${c.status === "pending" ? `<button class="option-btn" onclick="rejectClipItem('${c.id}')" style="border-color:var(--red);color:var(--red);">Reject</button>` : ""}
         </div>
       </div>
     `).join("");
@@ -737,6 +738,19 @@ async function markClipDelivered(id) {
     await fetch(`/api/clips/${id}/mark-delivered`, { method: "POST", headers: { "x-dashboard-token": TOKEN } });
     loadClips();
     loadClients();
+  } catch(e) { alert("Failed. Try again."); }
+}
+
+async function rejectClipItem(id) {
+  const reason = prompt("Why is this clip getting rejected? (Feeds directly into what Awon avoids next time — be specific.)");
+  if (reason === null) return;
+  try {
+    await fetch(`/api/clips/${id}/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-dashboard-token": TOKEN },
+      body: JSON.stringify({ reason }),
+    });
+    loadClips();
   } catch(e) { alert("Failed. Try again."); }
 }
 
