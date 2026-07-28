@@ -139,3 +139,13 @@ export function appendChat(role, text) {
   });
   return turn;
 }
+
+/**
+ * Wipe the conversation log only — facts/directives (the durable stuff Josh
+ * actually wants Awon to keep acting on) are untouched. Used for a one-time
+ * clean start after a business pivot (see clearAllBlockers in core/queue.js
+ * for the same pattern) and exposed on the dashboard for any future pivot.
+ */
+export function clearChat() {
+  update((d) => { d.chat = []; });
+}

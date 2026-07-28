@@ -26,10 +26,10 @@ import os from "os";
 import { fileURLToPath } from "url";
 import multer from "multer";
 import unzipper from "unzipper";
-import { getAllBlockers, resolveBlocker, getPendingBlockers, addBlockerOnce } from "../core/queue.js";
+import { getAllBlockers, resolveBlocker, getPendingBlockers, addBlockerOnce, clearAllBlockers } from "../core/queue.js";
 import { addNote, getAllNotes } from "../core/notes.js";
 import { handleChat } from "../core/chat.js";
-import { getChat, activeMemory, forget as forgetMemory } from "../core/chatMemory.js";
+import { getChat, activeMemory, forget as forgetMemory, clearChat } from "../core/chatMemory.js";
 import { getLog, log } from "../core/logger.js";
 import { loadMemory } from "../core/memory.js";
 import { BUSINESS_MODEL_SUMMARY } from "../core/claude.js";
@@ -230,6 +230,17 @@ export function startDashboard() {
     }
   });
 
+  // Wipe the whole queue — for a clean start after a business pivot, or just
+  // clearing out old noise. Real deletion, not a bulk-resolve.
+  app.post("/api/blockers/clear-all", (req, res) => {
+    try {
+      clearAllBlockers();
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Notes ─────────────────────────────────────────────────────────────────
   // Free-text notes Josh leaves proactively (not tied to a blocker Awon raised).
   // Awon reads unconsumed notes at the start of his next cycle.
@@ -270,6 +281,16 @@ export function startDashboard() {
       if (!message || !String(message).trim()) return res.status(400).json({ error: "message is required" });
       const result = await handleChat(message);
       res.json({ success: true, ...result });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Wipe the conversation thread only — facts/directives are untouched.
+  app.post("/api/chat/clear", (req, res) => {
+    try {
+      clearChat();
+      res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -342,6 +363,26 @@ export function startDashboard() {
       if (!url) return res.status(400).json({ error: "url is required" });
       const submission = clients.addFootageSubmission(req.params.id, { url });
       res.json({ success: true, submission });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Flattened outreach history across every client/prospect — newest first.
+  // Reuses client.outreach (already recorded by the outreach agent) rather
+  // than a second message-log data model; this is just a better view of data
+  // that already exists.
+  app.get("/api/outreach", (req, res) => {
+    try {
+      const all = clients.getAllClients();
+      const rows = [];
+      for (const c of all) {
+        for (const o of c.outreach || []) {
+          rows.push({ clientId: c.id, clientName: c.name, clientStatus: c.status, ...o });
+        }
+      }
+      rows.sort((a, b) => new Date(b.date) - new Date(a.date));
+      res.json(rows);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
