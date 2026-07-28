@@ -88,6 +88,44 @@ const STALE_BELIEF_PATTERNS = [
   /proof artifacts? by/i,
 ];
 
+// Retired-business scrub. The Rival Is Me → Awon Video redirect deleted every
+// Shopify/Printful/CJ Dropshipping/product-catalog file from the codebase,
+// but memory.json lives on the persistent volume and survives deploys by
+// design — so the OLD strategy text ("generate branded product mockups...
+// publish Printful listings...") kept re-seeding every cycle's decision step
+// for a full day after the redirect shipped, even though self_critique
+// correctly noticed every single cycle that no tool exists to execute it.
+// Same fix pattern as the stale-belief scrub above: reset on sight rather
+// than trust it to self-correct.
+const RETIRED_BUSINESS_PATTERNS = [
+  /rival is me/i,
+  /printful/i,
+  /\bshopify\b/i,
+  /cj dropship/i,
+  /product mockup/i,
+  /apparel listing/i,
+  /merch(andise)? (store|catalog|store)/i,
+  /\bpod\b product/i,
+];
+
+function scrubRetiredBusiness(memory) {
+  if (typeof memory.strategy === "string" && RETIRED_BUSINESS_PATTERNS.some((rx) => rx.test(memory.strategy))) {
+    memory.strategy = DEFAULT_MEMORY.strategy;
+  }
+  if (Array.isArray(memory.learnings)) {
+    memory.learnings = memory.learnings.filter((l) => {
+      const text = typeof l === "string" ? l : (l && l.insight) || "";
+      return !RETIRED_BUSINESS_PATTERNS.some((rx) => rx.test(text));
+    });
+  }
+  if (Array.isArray(memory.nextActions)) {
+    memory.nextActions = memory.nextActions.filter(
+      (a) => !RETIRED_BUSINESS_PATTERNS.some((rx) => rx.test(String(a)))
+    );
+  }
+  return memory;
+}
+
 function scrubStaleBeliefs(memory) {
   // The strategy field itself was left out of the original scrub, so ultimatum
   // language ("decision gate Friday", "operator escalates Monday") survived in
@@ -107,7 +145,7 @@ function scrubStaleBeliefs(memory) {
       (a) => !STALE_BELIEF_PATTERNS.some((rx) => rx.test(String(a)))
     );
   }
-  return memory;
+  return scrubRetiredBusiness(memory);
 }
 
 export function loadMemory() {
