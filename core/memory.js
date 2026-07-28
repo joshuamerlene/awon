@@ -189,6 +189,35 @@ function scrubStaleBeliefs(memory) {
   return scrubRetiredBusiness(memory);
 }
 
+/**
+ * Belt-and-suspenders on top of the pattern scrubs above: any learning or
+ * experiment timestamped BEFORE businessLaunchedAt is definitionally residue
+ * from the previous business, whether or not its wording happens to match a
+ * known pattern. Found live on 2026-07-28 during the dashboard redesign —
+ * the "Lessons Learned" panel was promoted to a more prominent spot and
+ * surfaced a handful of learnings about the old TikTok segment-tracking
+ * system (dotted-domain @the.rival.is.me references, "usedSegments") that
+ * the regex scrubs didn't catch because the wording itself doesn't match any
+ * listed pattern. A date cutoff catches these regardless of phrasing.
+ */
+function scrubPreLaunchLearnings(memory) {
+  const launch = memory.businessLaunchedAt ? new Date(memory.businessLaunchedAt).getTime() : null;
+  if (!launch) return memory;
+  if (Array.isArray(memory.learnings)) {
+    memory.learnings = memory.learnings.filter((l) => {
+      const date = l && l.date ? new Date(l.date).getTime() : null;
+      return date === null || date >= launch;
+    });
+  }
+  if (Array.isArray(memory.experiments)) {
+    memory.experiments = memory.experiments.filter((e) => {
+      const date = e && e.startedAt ? new Date(e.startedAt).getTime() : null;
+      return date === null || date >= launch;
+    });
+  }
+  return memory;
+}
+
 export function loadMemory() {
   if (!fs.existsSync(MEMORY_PATH)) {
     fs.mkdirSync(path.dirname(MEMORY_PATH), { recursive: true });
@@ -197,7 +226,7 @@ export function loadMemory() {
     return fresh;
   }
   const onDisk = JSON.parse(fs.readFileSync(MEMORY_PATH, "utf-8"));
-  return scrubStaleBeliefs(scrubOnIdentityChange(onDisk));
+  return scrubPreLaunchLearnings(scrubStaleBeliefs(scrubOnIdentityChange(onDisk)));
 }
 
 export function saveMemory(memory) {
