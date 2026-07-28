@@ -102,10 +102,11 @@ const RETIRED_BUSINESS_PATTERNS = [
   /printful/i,
   /\bshopify\b/i,
   /cj dropship/i,
-  /product mockup/i,
-  /apparel listing/i,
-  /merch(andise)? (store|catalog|store)/i,
+  /\bmockup/i, // catches "product mockup", "branded mockup", etc. — this business does none
+  /apparel/i,
+  /merch(andise)?\b/i,
   /\bpod\b product/i,
+  /\bhoodie|\btank\b|\bjoggers?\b|\bjersey\b/i,
 ];
 
 function scrubRetiredBusiness(memory) {
