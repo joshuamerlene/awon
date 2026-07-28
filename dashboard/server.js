@@ -35,6 +35,7 @@ import { loadMemory } from "../core/memory.js";
 import { Ledger } from "../core/ledger.js";
 import * as clients from "../core/clients.js";
 import * as freeTrial from "../core/freeTrial.js";
+import * as emailer from "../integrations/email.js";
 import { getClipQueue, markClipDelivered, rejectClip } from "../agents/clipAgent.js";
 import * as video from "../integrations/video.js";
 import * as tiktok from "../integrations/tiktok.js";
@@ -54,6 +55,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || "therivalisme";
 const PORT = process.env.PORT || 3000;
+// Where new-client-intake alerts go — real prospects were landing silently
+// in the dashboard with nothing pushing Josh to notice. Same failure class
+// as a bug found the same day on The DryLog (a lead form posting to a real
+// inbox nobody had ever activated) — fixed here before it repeated itself.
+const OWNER_EMAIL = process.env.OWNER_EMAIL || "joshuamerlene@gmail.com";
 
 export function startDashboard() {
   const app = express();
@@ -142,6 +148,27 @@ export function startDashboard() {
       }
 
       if (usingFreeTrial) freeTrial.checkAndFlagIfJustFilled();
+
+      // Fire-and-forget alert so a real prospect doesn't just sit in the
+      // dashboard until Josh happens to open it. Never blocks the response —
+      // if Resend isn't configured or the send fails, the intake itself
+      // still succeeds and is still recorded.
+      if (emailer.isConfigured()) {
+        emailer
+          .sendEmail({
+            to: OWNER_EMAIL,
+            subject: `New Awon Video ${usingFreeTrial ? "free-trial " : ""}lead — ${name}`,
+            html:
+              `<p>New submission from awonvideo.com:</p>` +
+              `<p><strong>${name}</strong> (${email})<br/>` +
+              `${company ? `Company/channel: ${company}<br/>` : ""}` +
+              `${message ? `Message: ${message}<br/>` : ""}` +
+              `${footageLink ? `Footage link submitted: ${footageLink}${rightsAutoAuthorized ? " (rights auto-authorized)" : ""}<br/>` : "No footage link yet.<br/>"}` +
+              `${usingFreeTrial ? "Using a free-trial slot.<br/>" : ""}` +
+              `</p><p>Check the Client Pipeline panel on the dashboard.</p>`,
+          })
+          .catch((e) => log("error", `Intake alert email failed: ${e.message}`));
+      }
 
       res.json({
         success: true,
