@@ -218,15 +218,9 @@
           <label>PAYOUT OWED</label>
           <div class="value small" id="budget-payout">—</div>
         </div>
-      </div>
-      <div id="image-budget-row" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
-        <label style="font-size:10px;color:var(--muted);letter-spacing:0.1em;display:block;margin-bottom:6px;">AI IMAGE BUDGET (THIS MONTH)</label>
-        <div style="display:flex;align-items:baseline;gap:8px;">
-          <span id="image-budget-spent" style="font-size:16px;font-weight:700;color:var(--accent);">—</span>
-          <span id="image-budget-meta" style="font-size:11px;color:var(--muted);"></span>
-        </div>
-        <div style="height:6px;background:var(--bg);border-radius:99px;margin-top:8px;overflow:hidden;">
-          <div id="image-budget-bar" style="height:100%;width:0%;background:var(--accent);border-radius:99px;transition:width .3s;"></div>
+        <div class="budget-item">
+          <label>TOTAL SPENT</label>
+          <div class="value small" id="budget-spent">—</div>
         </div>
       </div>
       <div class="budget-actions">
@@ -247,6 +241,16 @@
       </div>
       <div class="strategy-text" id="strategy-text">Loading...</div>
       <div class="next-actions" id="next-actions"></div>
+    </div>
+
+    <!-- Ledger / Spend History (full width) -->
+    <div class="panel blockers-panel">
+      <div class="panel-header">
+        <span class="panel-title">Spend &amp; Revenue History</span>
+      </div>
+      <div class="log-feed" id="ledger-container" style="max-height:300px;">
+        <div style="color:var(--muted);text-align:center;padding:20px;">Loading...</div>
+      </div>
     </div>
 
     <!-- Blockers (full width) -->
@@ -284,6 +288,46 @@
       </div>
       <div id="memory-container">
         <div class="memory-empty">Nothing saved yet — talk to him.</div>
+      </div>
+    </div>
+
+    <!-- Clients / Pipeline -->
+    <div class="panel footage-panel">
+      <div class="panel-header">
+        <span class="panel-title">Client Pipeline</span>
+        <span class="badge green" id="client-count-badge">0</span>
+      </div>
+      <div class="footage-drop" style="text-align:left;">
+        <div style="font-size:10px;color:var(--muted);letter-spacing:0.1em;margin-bottom:10px;">ADD A PROSPECT OR CLIENT MANUALLY</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <input class="note-input" style="min-height:auto;padding:10px 12px;" id="client-name-input" placeholder="Name" />
+          <input class="note-input" style="min-height:auto;padding:10px 12px;" id="client-email-input" placeholder="Contact email (optional)" />
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+          <select class="note-input" style="min-height:auto;padding:10px 12px;" id="client-deal-input">
+            <option value="">Deal type (optional)</option>
+            <option value="project">Project fee</option>
+            <option value="per-clip">Per-clip rate</option>
+            <option value="retainer">Monthly retainer</option>
+          </select>
+          <input class="note-input" style="min-height:auto;padding:10px 12px;" id="client-rate-input" type="number" min="0" step="1" placeholder="Rate $ (optional)" />
+          <input class="note-input" style="min-height:auto;padding:10px 12px;" id="client-source-input" placeholder="Source (optional)" />
+        </div>
+        <textarea class="note-input" id="client-notes-input" placeholder="Notes (optional)" rows="2"></textarea>
+        <div style="margin-top:8px;"><button class="resolve-btn" onclick="addClient()">Add to Pipeline</button></div>
+      </div>
+      <div class="footage-list" id="clients-container">
+        <div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No clients yet.</div>
+      </div>
+    </div>
+
+    <!-- Clip Delivery Queue -->
+    <div class="panel footage-panel">
+      <div class="panel-header">
+        <span class="panel-title">Clip Delivery Queue</span>
+      </div>
+      <div class="footage-list" id="clips-container">
+        <div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No clips produced yet.</div>
       </div>
     </div>
 
@@ -370,25 +414,20 @@ async function loadStatus() {
     document.getElementById("status-dot").className = "dot";
     document.getElementById("status-text").textContent = "Online";
     document.getElementById("last-cycle").textContent = `Last cycle ${relativeTime(s.lastCycle)}`;
+    if (s.businessName) {
+      document.title = `AWON · ${s.businessName}`;
+      document.querySelector(".logo").textContent = `AWON · ${s.businessName.toUpperCase()} OPERATIONS`;
+    }
     document.getElementById("cycle-badge").textContent = `Cycle #${s.cycleCount || 0}`;
     document.getElementById("budget-available").textContent = `$${s.budget.availableBudgetUsd}`;
     document.getElementById("budget-adcap").textContent = `$${s.budget.adCapUsd}`;
     document.getElementById("budget-profit").textContent = `$${s.budget.cumulativeNetProfitUsd}`;
     document.getElementById("budget-payout").textContent = `$${s.budget.ownerPayoutOwedUsd}`;
+    document.getElementById("budget-spent").textContent = `$${s.budget.cumulativeSpendUsd ?? 0}`;
     document.getElementById("funded-total").textContent = `You've funded $${s.budget.cumulativeFundedUsd ?? 0} total`;
     document.getElementById("clear-payout-row").style.display = s.budget.ownerPayoutOwedUsd > 0 ? "flex" : "none";
     document.getElementById("strategy-text").textContent = s.strategy || "Initializing...";
     document.getElementById("tiktok-connect-link").style.display = s.tiktokConnected ? "none" : "inline-block";
-
-    if (s.imageBudget) {
-      const ib = s.imageBudget;
-      document.getElementById("image-budget-spent").textContent = `$${Number(ib.spentUsd).toFixed(2)} / $${Number(ib.capUsd).toFixed(2)}`;
-      document.getElementById("image-budget-meta").textContent = `${ib.count} image${ib.count === 1 ? "" : "s"} · $${Number(ib.remainingUsd).toFixed(2)} left`;
-      const pct = ib.capUsd > 0 ? Math.min(100, (ib.spentUsd / ib.capUsd) * 100) : 0;
-      const bar = document.getElementById("image-budget-bar");
-      bar.style.width = `${pct}%`;
-      bar.style.background = pct >= 100 ? "var(--red)" : "var(--accent)";
-    }
 
     const nextEl = document.getElementById("next-actions");
     nextEl.innerHTML = (s.nextActions || []).map(a => `<div class="next-action">→ ${a}</div>`).join("");
@@ -550,6 +589,191 @@ async function uploadFootage() {
   } catch(e) { alert("Upload failed. Try again — videos must be mp4/mov/m4v under 500MB, archives must be .zip."); }
 }
 
+const LEDGER_TYPE_LABEL = { spend: "SPEND", revenue: "REVENUE", funding: "FUNDED", payout_cleared: "PAYOUT" };
+const LEDGER_TYPE_CLASS = { spend: "error", revenue: "action", funding: "sub-agent", payout_cleared: "decision" };
+
+async function loadLedger() {
+  try {
+    const data = await apiFetch("/api/ledger?limit=50");
+    const container = document.getElementById("ledger-container");
+    if (!data.transactions || data.transactions.length === 0) {
+      container.innerHTML = `<div style="color:var(--muted);text-align:center;padding:20px;">No transactions yet.</div>`;
+      return;
+    }
+    container.innerHTML = data.transactions.map(t => {
+      const sign = t.type === "spend" ? "-" : (t.type === "revenue" || t.type === "funding" ? "+" : "");
+      return `
+        <div class="log-entry">
+          <span class="log-type ${LEDGER_TYPE_CLASS[t.type] || "system"}">${LEDGER_TYPE_LABEL[t.type] || t.type}</span>
+          <span class="log-message">${escapeHtml(t.note || t.category || "")}${t.category && t.note ? ` <span style="color:var(--muted);">(${escapeHtml(t.category)})</span>` : ""}</span>
+          <span class="log-time" style="margin-left:8px;color:${t.type === "spend" ? "var(--red)" : "var(--online)"};">${sign}$${Number(t.amount).toFixed(2)}</span>
+          <span class="log-time">${relativeTime(t.date)}</span>
+        </div>
+      `;
+    }).join("");
+  } catch(e) {}
+}
+
+async function loadClients() {
+  try {
+    const clients = await apiFetch("/api/clients");
+    document.getElementById("client-count-badge").textContent = clients.length;
+    const container = document.getElementById("clients-container");
+    if (clients.length === 0) {
+      container.innerHTML = `<div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No clients yet.</div>`;
+      return;
+    }
+    container.innerHTML = clients.slice().reverse().map(c => `
+      <div class="footage-item" style="flex-direction:column;align-items:stretch;gap:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span class="footage-name"><strong>${escapeHtml(c.name)}</strong> <span style="color:var(--muted);">· ${c.status}</span>${c.dealType ? ` · ${c.dealType}${c.rateUsd ? ` $${c.rateUsd}` : ""}` : ""}</span>
+          <span class="footage-meta">${c.clipsDelivered || 0} delivered · $${(c.totalPaidUsd || 0).toFixed(0)} paid</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+          <span style="font-size:11px;${c.rightsAuthorized ? "color:var(--online);" : "color:#f59e0b;"}">${c.rightsAuthorized ? "✓ Rights authorized" : "⚠ Rights NOT authorized — footage won't be cut"}</span>
+          <div style="display:flex;gap:6px;">
+            ${!c.rightsAuthorized ? `<button class="option-btn" onclick="authorizeRights('${c.id}')">Authorize Rights</button>` : ""}
+            <button class="option-btn" onclick="toggleEditDeal('${c.id}')">Edit Deal</button>
+          </div>
+        </div>
+        <div id="edit-deal-${c.id}" style="display:none;">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;">
+            <select class="note-input" style="min-height:auto;padding:8px 10px;font-size:11px;" id="edit-status-${c.id}">
+              ${["prospect","contacted","negotiating","active","churned"].map(s => `<option value="${s}" ${c.status === s ? "selected" : ""}>${s}</option>`).join("")}
+            </select>
+            <select class="note-input" style="min-height:auto;padding:8px 10px;font-size:11px;" id="edit-dealtype-${c.id}">
+              <option value="">Deal type</option>
+              ${["project","per-clip","retainer"].map(t => `<option value="${t}" ${c.dealType === t ? "selected" : ""}>${t}</option>`).join("")}
+            </select>
+            <input class="note-input" style="min-height:auto;padding:8px 10px;font-size:11px;" id="edit-rate-${c.id}" type="number" min="0" step="1" value="${c.rateUsd || ""}" placeholder="Rate $" />
+          </div>
+          <button class="resolve-btn" onclick="saveDeal('${c.id}')">Save</button>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <input class="note-input" style="min-height:auto;padding:8px 10px;font-size:11px;" id="footage-url-${c.id}" placeholder="Footage URL (YouTube or Google Drive link — not Dropbox, Vizard doesn't support it)" />
+          <button class="option-btn" onclick="addFootageUrl('${c.id}')" style="white-space:nowrap;">Add Footage</button>
+        </div>
+      </div>
+    `).join("");
+  } catch(e) {}
+}
+
+async function addClient() {
+  const name = document.getElementById("client-name-input").value.trim();
+  if (!name) { document.getElementById("client-name-input").focus(); return; }
+  const body = {
+    name,
+    contactEmail: document.getElementById("client-email-input").value.trim() || undefined,
+    dealType: document.getElementById("client-deal-input").value || undefined,
+    rateUsd: parseFloat(document.getElementById("client-rate-input").value) || undefined,
+    sourceChannel: document.getElementById("client-source-input").value.trim() || undefined,
+    notes: document.getElementById("client-notes-input").value.trim() || undefined,
+  };
+  try {
+    const res = await fetch("/api/clients", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-dashboard-token": TOKEN },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error();
+    ["client-name-input","client-email-input","client-rate-input","client-source-input","client-notes-input"].forEach(id => document.getElementById(id).value = "");
+    document.getElementById("client-deal-input").value = "";
+    loadClients();
+  } catch(e) { alert("Failed to add client. Try again."); }
+}
+
+function toggleEditDeal(id) {
+  const el = document.getElementById(`edit-deal-${id}`);
+  el.style.display = el.style.display === "none" ? "block" : "none";
+}
+
+async function saveDeal(id) {
+  const body = {
+    status: document.getElementById(`edit-status-${id}`).value,
+    dealType: document.getElementById(`edit-dealtype-${id}`).value || null,
+    rateUsd: parseFloat(document.getElementById(`edit-rate-${id}`).value) || null,
+  };
+  try {
+    const res = await fetch(`/api/clients/${id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-dashboard-token": TOKEN },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error();
+    loadClients();
+  } catch(e) { alert("Failed to save deal terms. Try again."); }
+}
+
+async function authorizeRights(id) {
+  if (!confirm("Confirm you actually have permission to cut this client's footage (a signed agreement or explicit written permission) — this is what gates footage from being submitted for clipping.")) return;
+  try {
+    await fetch(`/api/clients/${id}/authorize-rights`, { method: "POST", headers: { "x-dashboard-token": TOKEN } });
+    loadClients();
+  } catch(e) { alert("Failed. Try again."); }
+}
+
+async function addFootageUrl(id) {
+  const input = document.getElementById(`footage-url-${id}`);
+  const url = input.value.trim();
+  if (!url) { input.focus(); return; }
+  try {
+    const res = await fetch(`/api/clients/${id}/footage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-dashboard-token": TOKEN },
+      body: JSON.stringify({ url }),
+    });
+    if (!res.ok) throw new Error();
+    input.value = "";
+    loadClients();
+  } catch(e) { alert("Failed to add footage URL. Try again."); }
+}
+
+async function loadClips() {
+  try {
+    const data = await apiFetch("/api/clips");
+    const container = document.getElementById("clips-container");
+    if (!data.items || data.items.length === 0) {
+      container.innerHTML = `<div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No clips produced yet.</div>`;
+      return;
+    }
+    container.innerHTML = data.items.map(c => `
+      <div class="footage-item" style="flex-direction:column;align-items:stretch;gap:6px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span class="footage-name"><strong>${escapeHtml(c.clientName || "Unknown client")}</strong> <span style="color:var(--muted);">· ${c.status}${c.viralScore ? ` · score ${c.viralScore}` : ""}</span></span>
+          <span class="footage-meta">${relativeTime(c.queuedAt)}</span>
+        </div>
+        <div style="font-size:12px;color:var(--text);">${escapeHtml(c.caption || "(no caption)")}</div>
+        <div style="display:flex;gap:8px;">
+          <a class="option-btn" style="text-decoration:none;" href="/api/clips/${c.id}/video?token=${encodeURIComponent(TOKEN)}" target="_blank">Preview</a>
+          ${c.status === "pending" ? `<button class="option-btn" onclick="markClipDelivered('${c.id}')">Mark Delivered</button>` : ""}
+          ${c.status === "pending" ? `<button class="option-btn" onclick="rejectClipItem('${c.id}')" style="border-color:var(--red);color:var(--red);">Reject</button>` : ""}
+        </div>
+      </div>
+    `).join("");
+  } catch(e) {}
+}
+
+async function markClipDelivered(id) {
+  try {
+    await fetch(`/api/clips/${id}/mark-delivered`, { method: "POST", headers: { "x-dashboard-token": TOKEN } });
+    loadClips();
+    loadClients();
+  } catch(e) { alert("Failed. Try again."); }
+}
+
+async function rejectClipItem(id) {
+  const reason = prompt("Why is this clip getting rejected? (Feeds directly into what Awon avoids next time — be specific.)");
+  if (reason === null) return;
+  try {
+    await fetch(`/api/clips/${id}/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-dashboard-token": TOKEN },
+      body: JSON.stringify({ reason }),
+    });
+    loadClips();
+  } catch(e) { alert("Failed. Try again."); }
+}
+
 function escapeHtml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
@@ -692,7 +916,7 @@ async function loadSandbox() {
 
 async function loadAll() {
   await loadStatus();
-  await Promise.all([loadBlockers(), loadChat(), loadMemory(), loadLog(), loadSandbox(), loadFootage()]);
+  await Promise.all([loadBlockers(), loadChat(), loadMemory(), loadLog(), loadSandbox(), loadFootage(), loadClients(), loadClips(), loadLedger()]);
 }
 
 // Enter sends the chat message (Shift+Enter for a newline)

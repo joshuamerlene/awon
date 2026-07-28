@@ -11,349 +11,85 @@
  * - Max 40 minutes per cycle (configurable via INNER_LOOP_MINUTES env var)
  * - Max 10 tasks per session (guards against runaway)
  * - Awon picks from a concrete action menu — no hallucinated capabilities
- * - Every task actually executes: writes to Shopify, Printful, content queue, etc.
+ * - Every task actually executes: sends invoices, flags stale prospects, etc.
  * - Session log prevents repeating the same task twice
  * - Awon can declare "done" early if there's nothing valuable left
  */
 
-import { thinkJSON, think, PERSONAS } from "./claude.js";
+import { thinkJSON, PERSONAS } from "./claude.js";
 import { log } from "./logger.js";
 import { addLearning } from "./memory.js";
 import { addBlockerOnce } from "./queue.js";
-import * as shopify from "../integrations/shopify.js";
-import * as printful from "../integrations/printful.js";
-import * as design from "../integrations/design.js";
-import * as imageBudget from "./imageBudget.js";
+import * as clients from "./clients.js";
+import * as stripe from "../integrations/stripe.js";
 
 const MAX_MINUTES = Number(process.env.INNER_LOOP_MINUTES || 40);
 const MAX_TASKS   = Number(process.env.INNER_LOOP_MAX_TASKS || 10);
 
 // ── Available actions Awon can self-assign ────────────────────────────────────
-// Each has a name, description (shown to Awon when choosing), and handler.
-// Awon picks based on what will move the needle most given current state.
 
 const ACTIONS = {
 
-  research_printful: {
-    description: "Research Printful catalog for new fitness POD product opportunities. Explore product types, price points, margins. Add strong candidates to memory for next product creation.",
-    async execute({ memory }) {
-      const keywords = ["gym shirt", "tank top", "fitness hoodie", "joggers", "gym shorts", "water bottle", "compression shirt", "training tee"];
-      const kw = keywords[Math.floor(Math.random() * keywords.length)];
+  draft_and_send_invoice: {
+    description: "Find an active client with a closed deal but no open/paid invoice yet, and send one via Stripe. Only runs if STRIPE_SECRET_KEY is set.",
+    async execute() {
+      if (!stripe.isConfigured()) return "Skipped — STRIPE_SECRET_KEY not set.";
 
-      const results = await thinkJSON({
-        system: PERSONAS.productAgent,
-        prompt: `Research Printful POD opportunities for The Rival Is Me fitness brand.
+      const candidates = clients.getActiveClients().filter(
+        (c) => c.rateUsd && !(c.invoices || []).some((inv) => inv.status === "open" || inv.status === "paid")
+      );
+      if (candidates.length === 0) return "No active clients need a fresh invoice right now.";
 
-Search keyword to explore: "${kw}"
-
-Based on your knowledge of fitness apparel and POD products, evaluate this category:
-- What specific products in this category fit The Rival Is Me brand?
-- What retail price would be premium but fair?
-- What messaging angle would make it fly on TikTok?
-- What's the estimated margin at that price?
-
-Printful keyword options: "t-shirt", "hoodie", "shorts", "joggers", "tank", "hat", "sweatshirt", "long sleeve", "beanie"
-
-Return JSON:
-{
-  "keyword": "${kw}",
-  "topCandidates": [
-    {
-      "printfulSearchKeyword": "t-shirt",
-      "suggestedTitle": "DISCIPLINE OVER COMFORT — Training Tee",
-      "retailPrice": 34.99,
-      "estimatedCOGS": 14.00,
-      "marginPercent": 60,
-      "tiktokAngle": "how to feature this on TikTok",
-      "urgency": "add now|add soon|test first",
-      "design": { "type": "logo|text|ai", "text": "TRIM", "color": "white|black", "prompt": "only for type ai — a short brief for the graphic to generate" }
-    }
-  ],
-  "categoryVerdict": "is this category worth pursuing for The Rival Is Me?"
-}
-
-Each candidate picks its own print "design": "logo" (the brand mark), "text" (short brand words rendered in Archivo Black — e.g. "TRIM", "NO ONE IS COMING"), or "ai" (GENERATE a real emblem/illustration from a "prompt" you write — this is how you make genuinely cool, original merch instead of only text and logo pieces). Vary it across candidates; reach for "ai" when a graphic would sell the piece better than words.
-AI IMAGE BUDGET — ${imageBudget.budgetLine()}`,
-        fast: true,
-      });
-
-      // Store candidates in memory for product agent to act on
-      memory.printfulCandidates = [
-        ...(memory.printfulCandidates || []),
-        ...results.topCandidates,
-      ].slice(-20); // keep last 20 candidates
-
-      return `Researched "${kw}" — ${results.topCandidates.length} candidates found. Verdict: ${results.categoryVerdict}`;
-    },
-  },
-
-  create_pod_product: {
-    description: "Take a queued Printful candidate from memory and actually create + publish it to Shopify. Only run if PRINTFUL_API_KEY is set and there are candidates waiting.",
-    async execute({ memory }) {
-      if (!printful.isConfigured()) return "Skipped — PRINTFUL_API_KEY not set.";
-
-      const candidates = (memory.printfulCandidates || []).filter(c => c.urgency === "add now" && !c.created);
-      if (candidates.length === 0) return "No urgent Printful candidates in queue. Run research_printful first.";
-
-      const candidate = candidates[0];
-
+      const client = candidates[0];
       try {
-        const catalogProduct = await printful.resolveCatalogProductForKeyword(candidate.printfulSearchKeyword || "t-shirt");
-        const logoUrl = await shopify.getStoreLogoUrl();
+        if (!client.contactEmail) throw new Error("no contact email on file");
+        const customer = await stripe.findOrCreateCustomer({ email: client.contactEmail, name: client.name });
+        clients.updateClient(client.id, { stripeCustomerId: customer.id });
 
-        // Resolve the print design the same way the product agent does:
-        // ai → an OpenAI graphic (budget-gated), text → Archivo Black, else logo.
-        // Any generation failure falls back to the logo — never blocks creation.
-        let designUrl = logoUrl;
-        const dsgn = candidate.design || {};
-        if (dsgn.type === "ai" && dsgn.prompt && design.hasImageGen()) {
-          try {
-            const rendered = await design.generateGraphicDesign(dsgn.prompt);
-            designUrl = rendered.url;
-            log("action", `Inner loop generated AI graphic for "${candidate.suggestedTitle}" → ${rendered.url}`);
-          } catch (e) {
-            log("error", `Inner loop AI graphic failed for "${candidate.suggestedTitle}" (${e.message}) — using logo instead.`);
-          }
-        } else if (dsgn.type === "text" && dsgn.text) {
-          try {
-            const rendered = await design.renderTextDesign(dsgn.text, { color: dsgn.color });
-            designUrl = rendered.url;
-            log("action", `Inner loop rendered text design "${String(dsgn.text).replace(/\n/g, " / ")}" for "${candidate.suggestedTitle}"`);
-          } catch (e) {
-            log("error", `Inner loop text design failed for "${candidate.suggestedTitle}" (${e.message}) — using logo instead.`);
-          }
-        }
+        const description = client.dealType === "retainer"
+          ? `${client.name} — monthly clip production retainer`
+          : `${client.name} — clip production (${client.clipsDelivered || 0} clip(s) delivered)`;
 
-        const product = await printful.createProduct({
-          title: candidate.suggestedTitle,
-          description: `<p>${candidate.suggestedTitle}</p><p>Built for the ones who chose discipline. The Rival Is Me. #THERIVALISME</p>`,
-          catalogProductId: catalogProduct.catalogProductId,
-          variants: catalogProduct.variants,
-          retailPrice: candidate.retailPrice || 34.99,
-          imageUrl: designUrl,
+        const invoice = await stripe.createAndSendInvoice({
+          customerId: customer.id,
+          description,
+          amountUsd: client.rateUsd,
         });
-
-        // Remember the design so fulfillment prints the same art the listing shows.
-        if (designUrl && designUrl !== logoUrl) design.saveProductDesign(product.id, designUrl);
-
-        // Surface it where customers browse: add apparel to the MERCH ("frontpage")
-        // collection so it shows in the store nav, not just under All Products.
-        try {
-          const r = await shopify.addProductToCollectionByHandle(product.id, "frontpage");
-          if (r.ok) log("action", `Added "${candidate.suggestedTitle}" to the MERCH collection.`);
-        } catch { /* non-fatal — product is still live storewide */ }
-
-        // Mark as created in memory
-        candidate.created = true;
-        candidate.printfulId = product.id;
-
-        return `Created and published "${candidate.suggestedTitle}" to Shopify via Printful (ID: ${product.id})`;
-      } catch (err) {
-        if (/401|invalid|unauthorized/i.test(err.message)) {
-          addBlockerOnce({
-            title: "Printful API key is invalid — no POD products can go live",
-            context: `Printful is rejecting every request with a 401/Unauthorized error: "${err.message}". Go to printful.com/dashboard/settings/api, regenerate the key, and update PRINTFUL_API_KEY in Railway's env vars.`,
-            options: ["I've updated the Printful API key in Railway", "Skip Printful for now"],
-            thread: "Once the key works again, I'll resume creating and publishing POD products.",
-          });
-        }
-        return `Failed to create "${candidate.suggestedTitle}": ${err.message}`;
-      }
-    },
-  },
-
-  improve_product_descriptions: {
-    description: "Rewrite all active Shopify product descriptions in The Rival Is Me voice — direct, disciplined, no corporate speak. Update them on Shopify.",
-    async execute({ products }) {
-      if (products.length === 0) return "No active products to improve.";
-
-      let improved = 0;
-      for (const product of products.slice(0, 5)) { // max 5 per session
-        try {
-          const newDescription = await think({
-            system: PERSONAS.awon,
-            prompt: `Rewrite this product description in The Rival Is Me voice.
-
-Product: ${product.title}
-Current description: ${product.body_html || "(none)"}
-Price: $${product.variants?.[0]?.price}
-
-Voice rules:
-- Raw and direct. Sounds like a real person who trains.
-- No buzzwords, no corporate speak, no "premium quality"
-- Short punchy sentences. Max 3 paragraphs.
-- End with something that feels like a challenge or statement of intent
-- HTML format (<p> tags)
-
-Write the new description only. Nothing else.`,
-            fast: true,
-          });
-
-          await shopify.updateProduct(product.id, { body_html: newDescription });
-          improved++;
-          log("action", `Improved description for "${product.title}"`);
-        } catch (err) {
-          log("error", `Description update failed for ${product.id}: ${err.message}`);
-        }
-      }
-
-      return `Rewrote descriptions for ${improved} product(s) in The Rival Is Me voice`;
-    },
-  },
-
-  plan_content_series: {
-    description: "Develop a detailed 3-5 video TikTok content arc and write it fully to the content queue. Hooks, captions, editing notes, posting schedule — the whole thing.",
-    async execute({ memory, products }) {
-      const { getContentQueue } = await import("../agents/content.js");
-      const fs = await import("fs");
-      const path = await import("path");
-      const { fileURLToPath } = await import("url");
-      const __dirname = path.dirname(fileURLToPath(import.meta.url));
-      const QUEUE_PATH = path.join(__dirname, "../data/content_queue.json");
-
-      const series = await thinkJSON({
-        system: PERSONAS.contentAgent,
-        prompt: `Develop a complete 5-video TikTok content series for @the.rival.is.me.
-
-Available products: ${JSON.stringify(products.map(p => ({ title: p.title, price: p.variants?.[0]?.price })))}
-What's worked before: ${memory.contentNotes?.workingFormats?.join(", ") || "no data yet"}
-Current strategy: ${memory.strategy || "building from scratch"}
-
-Design a series arc where each video builds on the last. Think narrative momentum — someone should be able to watch all 5 and feel like they're following a story.
-
-Return JSON:
-{
-  "seriesName": "name for this arc",
-  "seriesHook": "the overarching theme that ties all 5 together",
-  "videos": [
-    {
-      "position": 1,
-      "hook": "first 2 seconds — make them stop",
-      "caption": "full caption, max 150 chars, sounds like a real person",
-      "hashtags": ["discipline", "therivalisme"],
-      "editingNotes": "specific: trim 0:00-0:12, text overlay at 0:03, use trending sound X",
-      "contentAngle": "discipline|transformation|product|challenge|motivation",
-      "suggestedPostTime": "ISO timestamp — optimal time",
-      "productId": null,
-      "seriesTag": "series name"
-    }
-  ]
-}
-
-Write real captions and hooks — not templates. Make it feel like someone who actually lives this wrote it.`,
-        fast: false,
-      });
-
-      // Write all videos to content queue
-      const queue = JSON.parse(fs.existsSync(QUEUE_PATH) ? fs.readFileSync(QUEUE_PATH, "utf8") : "[]");
-      const newItems = (series.videos || []).map((v, i) => ({
-        id: `series_${Date.now()}_${i}`,
-        status: "pending",
-        queuedAt: new Date().toISOString(),
-        seriesName: series.seriesName,
-        ...v,
-      }));
-      queue.push(...newItems);
-      const dir = path.dirname(QUEUE_PATH);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(QUEUE_PATH, JSON.stringify(queue, null, 2));
-
-      return `Planned "${series.seriesName}" series — ${newItems.length} videos queued. Theme: ${series.seriesHook}`;
-    },
-  },
-
-  write_blog_post: {
-    description: "Write a full brand-aligned blog post and publish it as a REAL Shopify blog article (shows up in the store's blog feed, not just a static page). Real, personal, discipline-focused.",
-    async execute({ memory }) {
-      const topic = await think({
-        system: PERSONAS.awon,
-        prompt: `Pick ONE blog post topic for The Rival Is Me that:
-- Feels personal and real, not like SEO content
-- Ties into discipline, the rival within, or the Sanctuary mission
-- Could attract someone who googles "how to stay disciplined" or "fitness mindset"
-- Is something Josh (the founder) would actually have thought about
-
-Return only the topic title. Nothing else.`,
-        fast: true,
-      });
-
-      const postHTML = await think({
-        system: PERSONAS.awon,
-        prompt: `Write a full blog post for The Rival Is Me on this topic: "${topic.trim()}"
-
-Rules:
-- 400-600 words
-- Written like the founder — personal, direct, no fluff
-- HTML format using <h2>, <p>, <strong> tags
-- Ends with a call to action that feels like a challenge, not a sales pitch
-- DO NOT mention specific product names or prices
-- Reference "The Rival" (the lazy version of yourself) naturally
-- The tone: like a journal entry crossed with a manifesto
-- Do NOT wrap the output in markdown code fences (no \`\`\`html or \`\`\` anywhere) — raw HTML only, nothing else
-
-Write the full post HTML only.`,
-        fast: false,
-      });
-
-      // Safety net: strip markdown code fences if the model adds them anyway
-      const cleanHTML = postHTML.trim().replace(/^```(?:html)?\s*/i, "").replace(/```\s*$/i, "").trim();
-
-      try {
-        const blog = await shopify.getOrCreateDefaultBlog();
-        const article = await shopify.createArticle(blog.id, {
-          title: topic.trim(),
-          body_html: cleanHTML,
-          tags: "discipline, mindset, the rival is me",
+        clients.attachInvoice(client.id, {
+          invoiceId: invoice.invoiceId,
+          amountUsd: client.rateUsd,
+          hostedInvoiceUrl: invoice.hostedInvoiceUrl,
         });
-        return `Published blog post: "${topic.trim()}" — live at /blogs/${blog.handle}/${article.handle}`;
+        return `Sent invoice to "${client.name}" for $${client.rateUsd} (${invoice.invoiceId}).`;
       } catch (err) {
-        return `Wrote blog post "${topic.trim()}" but couldn't publish: ${err.message}`;
+        return `Failed to invoice "${client.name}": ${err.message}`;
       }
     },
   },
 
-  audit_product_titles: {
-    description: "Review all product titles for brand fit, SEO, and The Rival Is Me voice. Rename anything that sounds generic or off-brand.",
-    async execute({ products }) {
-      if (products.length === 0) return "No active products to audit.";
-
-      const audit = await thinkJSON({
-        system: PERSONAS.productAgent,
-        prompt: `Audit these product titles for The Rival Is Me brand fit.
-
-Products:
-${JSON.stringify(products.map(p => ({ id: p.id, title: p.title, price: p.variants?.[0]?.price })))}
-
-For each product, decide:
-- Does the title sound like The Rival Is Me? (disciplined, direct, premium)
-- Is it searchable? (someone searching "gym shirt" should find it)
-- Is it worth renaming?
-
-Title formula that works: [DISCIPLINE PHRASE] — [Product Type]
-Examples: "BUILT NOT BORN — Training Tee", "6AM CLUB — Performance Hoodie"
-
-Return JSON:
-{
-  "renames": [
-    { "productId": "...", "oldTitle": "...", "newTitle": "...", "reasoning": "..." }
-  ],
-  "noChangeNeeded": ["productId", ...]
-}`,
-        fast: true,
+  audit_prospect_pipeline: {
+    description: "Review every prospect for missing contact info or staleness (contacted long ago with no follow-up), and flag anything Josh needs to act on. Prospect discovery itself runs inside the outreach agent (live web search), not here.",
+    async execute() {
+      const all = clients.getAllClients();
+      const missingContact = all.filter((c) => c.status === "prospect" && !c.contactEmail);
+      const staleContacted = all.filter((c) => {
+        if (c.status !== "contacted") return false;
+        const last = c.outreach?.[c.outreach.length - 1];
+        if (!last) return false;
+        const daysSince = (Date.now() - new Date(last.date).getTime()) / 86400000;
+        return daysSince > 10;
       });
 
-      let renamed = 0;
-      for (const rename of audit.renames || []) {
-        try {
-          await shopify.updateProduct(rename.productId, { title: rename.newTitle });
-          log("action", `Renamed "${rename.oldTitle}" → "${rename.newTitle}": ${rename.reasoning}`);
-          renamed++;
-        } catch (err) {
-          log("error", `Rename failed (${rename.productId}): ${err.message}`);
-        }
+      if (missingContact.length > 0) {
+        addBlockerOnce({
+          title: `${missingContact.length} prospect(s) have no contact email`,
+          context: `Can't send outreach without one: ${missingContact.map((c) => c.name).join(", ")}.`,
+          options: ["I'll add contact emails via the dashboard"],
+          thread: "Once contact info is added, outreach will go out next cycle.",
+        });
       }
 
-      return `Audited ${products.length} product titles — ${renamed} renamed, ${(audit.noChangeNeeded || []).length} kept`;
+      return `Audited ${all.length} client(s): ${missingContact.length} missing contact info, ${staleContacted.length} contacted 10+ days ago with no reply logged.`;
     },
   },
 
@@ -372,10 +108,10 @@ Pending blockers: ${memory.blockers || "none"}
 Be honest. What did you do well? What was a bad call? What would you do differently?
 
 GROUND TRUTH about what you can do — do NOT contradict this in your critique or your newRule:
-- You PUBLISH DIRECTLY. Creating a Shopify product, editing a listing or price, publishing a blog post, changing store content, and adding products to collections all execute through your own tools and are DONE the moment they go live. That is your job, not Josh's.
-- The ONLY thing a human does by hand is tap "public" on TikTok videos you've already produced and queued — and only until the TikTok audit clears. That single exception is the entire list.
-- NEVER write a rule that says publishing, posting, or "execution" is Josh's lane, that there's a "capability boundary," or that you only "prepare" while Josh "executes." That belief is FALSE, it has stalled you for dozens of cycles, and it is banned. If something is actually blocked, name the specific technical blocker (an error, a missing API key) — never a capability boundary.
-- If you have zero orders, the fix is more/better products live and more content out — not more planning or more "specs for Josh." Ship product.
+- You EXECUTE DIRECTLY: sourcing footage submissions, drafting and sending outreach, producing clips, generating and sending Stripe invoices, and tracking the whole pipeline all run through your own tools and are DONE the moment they execute. That is your job, not Josh's.
+- The ONLY things that require Josh personally: creating or authenticating any new external account (Stripe, email sending domain, Vizard, a social account for portfolio use), and signing an actual contract or deal commitment with a client.
+- NEVER write a rule that says outreach, invoicing, or clip production is Josh's lane, that there's a "capability boundary," or that you only "prepare" while Josh "executes." That belief is FALSE. It stalled this business's predecessor for months and is banned here. If something is actually blocked, name the specific technical blocker (a missing API key, a missing contact email) — never a capability boundary.
+- If the pipeline is empty, the fix is more real outreach to real prospects already in the system — not more planning or more "specs for Josh."
 
 Return JSON:
 {
@@ -387,27 +123,25 @@ Return JSON:
         fast: true,
       });
 
-      // Store the new rule as a learning
-      if (critique.newRule) {
-        addLearning(memory, critique.newRule);
-      }
+      if (critique.newRule) addLearning(memory, critique.newRule);
 
       return `Self-critique complete. Wins: ${critique.wins?.length || 0}. Misses: ${critique.misses?.length || 0}. New rule: "${critique.newRule}"`;
     },
   },
 
   build_weekly_plan: {
-    description: "Build a structured plan for the next 7 days — what products to add, what content to post, what store changes to make. Store it in memory.",
-    async execute({ memory, products }) {
+    description: "Build a structured plan for the next 7 days — who to contact, what footage to process, what invoices are due. Store it in memory.",
+    async execute({ memory }) {
+      const all = clients.getAllClients();
       const plan = await thinkJSON({
         system: PERSONAS.awon,
-        prompt: `Build a 7-day operating plan for The Rival Is Me.
+        prompt: `Build a 7-day operating plan for the clip production business.
 
 Current state:
-- Active products: ${products.length}
+- Total clients: ${all.length}
+- Prospects awaiting first contact: ${clients.getProspects().filter(p => (p.outreach || []).length === 0).length}
+- Active clients: ${clients.getActiveClients().length}
 - Current strategy: ${memory.strategy}
-- Pending Printful candidates: ${(memory.printfulCandidates || []).filter(c => !c.created).length}
-- Content queue size: ${memory.contentNotes?.queueSize || "unknown"}
 
 Build a realistic, specific plan. Not aspirational — executable.
 
@@ -417,9 +151,8 @@ Return JSON:
   "days": [
     {
       "day": "Monday",
-      "productGoal": "what product work to do",
-      "contentGoal": "what content to plan or post",
-      "storeGoal": "any store changes",
+      "outreachGoal": "what outreach work to do",
+      "deliveryGoal": "what footage/clip work to do",
       "priority": "the single most important thing this day"
     }
   ],
@@ -439,7 +172,7 @@ Return JSON:
 
 // ── Inner loop orchestrator ────────────────────────────────────────────────────
 
-export async function runInnerLoop({ memory, products, orders, ledger }) {
+export async function runInnerLoop({ memory, ledger }) {
   const startTime = Date.now();
   const maxMs = MAX_MINUTES * 60 * 1000;
   const sessionLog = []; // what we've done this session — prevents repeats
@@ -464,7 +197,6 @@ export async function runInnerLoop({ memory, products, orders, ledger }) {
       break;
     }
 
-    // Ask Awon what to do next
     let decision;
     try {
       decision = await thinkJSON({
@@ -472,11 +204,9 @@ export async function runInnerLoop({ memory, products, orders, ledger }) {
         prompt: `You've finished your main cycle work. You have ${timeRemaining} minutes left to work. What's the most valuable thing you can do right now?
 
 Current state:
-- Active products in store: ${products.length}
-- Printful configured: ${printful.isConfigured()}
-- Orders today: ${orders.length}
-- Printful candidates queued: ${(memory.printfulCandidates || []).filter(c => !c.created).length}
-- Weekly plan exists: ${!!memory.weeklyPlan}
+- Total clients: ${clients.getAllClients().length}
+- Active clients: ${clients.getActiveClients().length}
+- Stripe configured: ${stripe.isConfigured()}
 - Current strategy: ${memory.strategy}
 
 Already done this session: ${sessionLog.join(", ") || "nothing yet"}
@@ -502,20 +232,20 @@ Return JSON: { "action": "action_name_or_done", "reasoning": "why this is the be
     const action = ACTIONS[decision.action];
     if (!action) {
       log("error", `Inner loop: unknown action "${decision.action}" — skipping`);
-      sessionLog.push(decision.action); // mark as attempted to avoid looping
+      sessionLog.push(decision.action);
       continue;
     }
 
     log("action", `Inner loop task ${taskCount + 1}: ${decision.action} — ${decision.reasoning}`);
 
     try {
-      const result = await action.execute({ memory, products, orders, ledger });
+      const result = await action.execute({ memory, ledger });
       log("action", `Inner loop task done: ${result}`);
       sessionLog.push(decision.action);
       taskCount++;
     } catch (err) {
       log("error", `Inner loop task failed (${decision.action}): ${err.message}`);
-      sessionLog.push(decision.action); // don't retry failed tasks
+      sessionLog.push(decision.action);
       taskCount++;
     }
   }

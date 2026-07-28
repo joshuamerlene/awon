@@ -15,6 +15,8 @@
  *   GET  /auth/tiktok/callback   — exchanges code for TIKTOK_CONTENT_ACCESS_TOKEN
  *   GET  /api/footage            — list raw footage Josh has uploaded
  *   POST /api/footage/upload     — Josh uploads raw video files for Awon to edit
+ *   GET  /api/public/status      — unauthenticated: free-trial slot status for awonvideo.com
+ *   POST /api/public/intake      — unauthenticated: the site's "Send Your Video" form lands here
  */
 
 import express from "express";
@@ -24,19 +26,29 @@ import os from "os";
 import { fileURLToPath } from "url";
 import multer from "multer";
 import unzipper from "unzipper";
-import { getAllBlockers, resolveBlocker, getPendingBlockers } from "../core/queue.js";
+import { getAllBlockers, resolveBlocker, getPendingBlockers, addBlockerOnce } from "../core/queue.js";
 import { addNote, getAllNotes } from "../core/notes.js";
 import { handleChat } from "../core/chat.js";
 import { getChat, activeMemory, forget as forgetMemory } from "../core/chatMemory.js";
-import * as imageBudget from "../core/imageBudget.js";
 import { getLog, log } from "../core/logger.js";
 import { loadMemory } from "../core/memory.js";
 import { Ledger } from "../core/ledger.js";
-import { getContentQueue } from "../agents/content.js";
-import * as shopify from "../integrations/shopify.js";
+import * as clients from "../core/clients.js";
+import * as freeTrial from "../core/freeTrial.js";
+import { getClipQueue, markClipDelivered, rejectClip } from "../agents/clipAgent.js";
 import * as video from "../integrations/video.js";
 import * as tiktok from "../integrations/tiktok.js";
 import { getReviewQueue, getReviewItem, updateReviewItem, isReviewMode } from "../core/reviewQueue.js";
+
+// Origins allowed to call the unauthenticated /api/public/* routes from a
+// browser. The Netlify preview URL stays here as a fallback even after the
+// custom domain is wired, since it costs nothing to leave it and saves a
+// redeploy if the domain ever needs to be re-pointed.
+const PUBLIC_SITE_ORIGINS = [
+  "https://awonvideo.com",
+  "https://www.awonvideo.com",
+  "https://cozy-babka-5c01ef.netlify.app",
+];
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -52,16 +64,95 @@ export function startDashboard() {
   // pull the files. Served from the persistent Volume.
   app.use("/designs", express.static(path.join(__dirname, "..", "data", "designs")));
 
+  // CORS for the public marketing site (awonvideo.com) hitting /api/public/*
+  // from a browser. Scoped to an explicit origin allowlist, not wide open —
+  // this is the only part of the API a stranger's browser ever touches.
+  app.use((req, res, next) => {
+    if (!req.path.startsWith("/api/public")) return next();
+    const origin = req.headers.origin;
+    if (PUBLIC_SITE_ORIGINS.includes(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    }
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+  });
+
   // Simple auth middleware
   function auth(req, res, next) {
     const token = req.headers["x-dashboard-token"] || req.query.token;
     if (token === DASHBOARD_PASSWORD) return next();
     // Allow unauthenticated access to the HTML shell (auth happens client-side)
     if (req.path === "/" || req.path.endsWith(".html") || !req.path.startsWith("/api")) return next();
+    // The public site's own routes are meant to be hit with no token at all —
+    // that's the whole point of them (see PUBLIC_SITE_ORIGINS / CORS above).
+    if (req.path.startsWith("/api/public")) return next();
     res.status(401).json({ error: "Unauthorized. Pass ?token=<DASHBOARD_PASSWORD> or X-Dashboard-Token header." });
   }
 
   app.use(auth);
+
+  // ── Public site intake (awonvideo.com "Send Your Video" form) ─────────────
+  // Unauthenticated on purpose — see CORS block above. Kept minimal: this
+  // never returns internal state (budget, strategy, memory), only the one
+  // thing the site needs to decide which copy to show.
+  app.get("/api/public/status", (req, res) => {
+    try {
+      res.json({ freeTrial: freeTrial.getFreeTrialStatus() });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/public/intake", (req, res) => {
+    try {
+      const { name, email, company, footageLink, message, consent } = req.body || {};
+      if (!name || !String(name).trim()) return res.status(400).json({ error: "name is required" });
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: "a valid email is required" });
+      if (footageLink && !consent) {
+        return res.status(400).json({ error: "consent is required when submitting a footage link" });
+      }
+
+      const trialStatusBefore = freeTrial.getFreeTrialStatus();
+      const usingFreeTrial = trialStatusBefore.open;
+
+      const notesParts = [`Submitted via awonvideo.com public intake form.`];
+      if (company) notesParts.push(`Channel/company: ${company}`);
+      if (message) notesParts.push(`Message: ${message}`);
+
+      const client = clients.addClient({
+        name,
+        contactEmail: email,
+        sourceChannel: usingFreeTrial ? freeTrial.FREE_TRIAL_SOURCE : "website",
+        notes: notesParts.join(" "),
+      });
+
+      let rightsAutoAuthorized = false;
+      if (footageLink && consent) {
+        clients.addFootageSubmission(client.id, { url: footageLink });
+        clients.updateClient(client.id, {
+          rightsAuthorized: true,
+          notes: `${client.notes} Rights auto-authorized: footage submitted directly via the public site's intake form with the consent box checked.`,
+        });
+        rightsAutoAuthorized = true;
+        log("action", `New client "${name}" (${email}) submitted footage directly via the site — rights auto-authorized, queued for Vizard.`);
+      } else {
+        log("action", `New prospect "${name}" (${email}) reached out via the site with no footage yet.`);
+      }
+
+      if (usingFreeTrial) freeTrial.checkAndFlagIfJustFilled();
+
+      res.json({
+        success: true,
+        hadFootage: !!footageLink,
+        rightsAutoAuthorized,
+        freeTrial: usingFreeTrial,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // ── Status ────────────────────────────────────────────────────────────────
   app.get("/api/status", (req, res) => {
@@ -71,13 +162,16 @@ export function startDashboard() {
       const pending = getPendingBlockers();
       res.json({
         online: true,
+        businessName: process.env.BUSINESS_NAME || "Awon",
         lastCycle: memory.updatedAt,
         cycleCount: memory.cycleCount,
         strategy: memory.strategy,
         nextActions: memory.nextActions,
         budget: ledger.getSummary(),
-        imageBudget: imageBudget.status(),
         pendingBlockers: pending.length,
+        clientCount: clients.getAllClients().length,
+        activeClientCount: clients.getActiveClients().length,
+        freeTrial: freeTrial.getFreeTrialStatus(),
         tiktokConnected: !!process.env.TIKTOK_CONTENT_ACCESS_TOKEN,
         timestamp: new Date().toISOString(),
       });
@@ -170,39 +264,106 @@ export function startDashboard() {
     }
   });
 
-  // ── Budget ────────────────────────────────────────────────────────────────
-  // -- Backfill collections --
-  // One-time: drop every apparel product already live into the MERCH
-  // ("frontpage") collection so the storefront nav shows the full catalog, not
-  // just the 3 originals. Fire-and-forget (throttled) so the HTTP call returns
-  // immediately; progress lands in the activity log.
-  app.post("/api/backfill-collections", (req, res) => {
-    res.json({ ok: true, status: "started — check the activity log for results" });
-    (async () => {
-      try {
-        const col = await shopify.findCollectionByHandle("frontpage");
-        if (!col) {
-          log("system", "Backfill: 'frontpage' is not a custom collection (may be smart/auto) — cannot add via API. No change made.");
-          return;
-        }
-        const products = await shopify.getProducts();
-        const isApparel = (p) =>
-          /pod|pf_dropship/i.test(p.tags || "") ||
-          /shirt|tee\b|tank|hoodie|jogger|short|sweatshirt|long ?sleeve|\bhat\b|beanie|crewneck|apparel|gear/i.test(
-            `${p.product_type || ""} ${p.title || ""}`
-          );
-        const targets = products.filter(isApparel);
-        let added = 0, failed = 0;
-        for (const p of targets) {
-          try { await shopify.addProductToCollection(p.id, col.id); added++; }
-          catch { failed++; }
-          await new Promise((r) => setTimeout(r, 300)); // Shopify REST rate limit
-        }
-        log("action", `Backfill complete: added ${added}/${targets.length} apparel products to the MERCH collection (${failed} already-in/failed).`);
-      } catch (e) {
-        log("error", `Backfill collections failed: ${e.message}`);
-      }
-    })();
+  // ── Clients / pipeline ───────────────────────────────────────────────────
+  app.get("/api/clients", (req, res) => {
+    try {
+      res.json(clients.getAllClients());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Add a prospect/client. Prospect discovery isn't automated (no search API
+  // wired in) — this is how Josh feeds candidates in until that exists.
+  app.post("/api/clients", (req, res) => {
+    try {
+      const { name, contactEmail, sourceChannel, dealType, rateUsd, notes, status } = req.body || {};
+      if (!name) return res.status(400).json({ error: "name is required" });
+      const client = clients.addClient({ name, contactEmail, sourceChannel, dealType, rateUsd, notes, status });
+      res.json({ success: true, client });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/clients/:id", (req, res) => {
+    try {
+      const client = clients.updateClient(req.params.id, req.body || {});
+      res.json({ success: true, client });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Explicit rights authorization — required before any of this client's
+  // footage gets submitted for clipping. Confirming this is Josh's call.
+  app.post("/api/clients/:id/authorize-rights", (req, res) => {
+    try {
+      const client = clients.updateClient(req.params.id, { rightsAuthorized: true });
+      res.json({ success: true, client });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/clients/:id/footage", (req, res) => {
+    try {
+      const { url } = req.body || {};
+      if (!url) return res.status(400).json({ error: "url is required" });
+      const submission = clients.addFootageSubmission(req.params.id, { url });
+      res.json({ success: true, submission });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Clip delivery queue ──────────────────────────────────────────────────
+  app.get("/api/clips", (req, res) => {
+    try {
+      const queue = getClipQueue();
+      const status = req.query.status;
+      const items = status ? queue.filter((i) => i.status === status) : queue;
+      res.json({ total: items.length, items: items.reverse() });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/clips/:id/video", (req, res) => {
+    const item = getClipQueue().find((i) => i.id === req.params.id);
+    if (!item || !fs.existsSync(item.videoPath)) return res.status(404).json({ error: "Not found" });
+    res.sendFile(path.resolve(item.videoPath));
+  });
+
+  app.post("/api/clips/:id/mark-delivered", (req, res) => {
+    try {
+      markClipDelivered(req.params.id);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Rejecting with a reason feeds the clip agent's next curation pass —
+  // a real feedback loop, not a silent discard.
+  app.post("/api/clips/:id/reject", (req, res) => {
+    try {
+      const item = rejectClip(req.params.id, req.body?.reason);
+      res.json({ success: true, item });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Spend/revenue/funding history behind the summary numbers on /api/status.
+  app.get("/api/ledger", (req, res) => {
+    try {
+      const ledger = new Ledger();
+      const limit = Math.min(Number(req.query.limit || 50), 200);
+      res.json({ summary: ledger.getSummary(), transactions: ledger.getRecentTransactions(limit) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.post("/api/budget/add-funds", (req, res) => {
@@ -317,19 +478,9 @@ export function startDashboard() {
     }
   });
 
-  // ── Content Queue ─────────────────────────────────────────────────────────
-  app.get("/api/content-queue", (req, res) => {
-    try {
-      const queue = getContentQueue();
-      const status = req.query.status; // filter by ?status=pending|posted
-      const items = status ? queue.filter(i => i.status === status) : queue;
-      res.json({ total: items.length, items: items.reverse() }); // newest first
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
   // ── TikTok Review Queue (audit-compliant compose flow, /review.html) ──────
+  // Dormant unless Josh wires up TIKTOK_CONTENT_ACCESS_TOKEN for an optional
+  // portfolio/demo-reel channel — the business itself doesn't depend on it.
   app.get("/api/review", async (req, res) => {
     try {
       const items = getReviewQueue().filter(i => i.status === "pending");
@@ -399,17 +550,6 @@ export function startDashboard() {
     }
   });
 
-  // ── Archive All Products ──────────────────────────────────────────────────
-  // One-time nuclear option: archive all active products so Awon rebuilds from scratch.
-  app.post("/api/archive-all-products", async (req, res) => {
-    try {
-      const archived = await shopify.archiveAllProducts();
-      res.json({ success: true, count: archived.length, products: archived });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
   // ── TikTok OAuth (Login Kit v2 / Content Posting API) ───────────────────────
   // Kicks off the real OAuth consent flow to get TIKTOK_CONTENT_ACCESS_TOKEN for
   // @the.rival.is.me. Required even for unaudited posting — audit status only
@@ -474,49 +614,6 @@ export function startDashboard() {
           `<p>Awon is authorized to post to this TikTok account. Credentials are stored securely server-side and refresh automatically.</p>` +
           `<p>Scopes granted: ${tokenData.scope}</p>` +
           `<a href="/">Back to dashboard</a></div></body></html>`
-        );
-      } else {
-        res.send(`<h1>Token Exchange Error</h1><pre>${JSON.stringify(tokenData, null, 2)}</pre>`);
-      }
-    } catch (err) {
-      res.status(500).send(`<h1>Error</h1><p>${err.message}</p>`);
-    }
-  });
-
-  // ── Shopify OAuth Callback ─────────────────────────────────────────────────
-  // Called by Shopify after store owner approves app install.
-  // Exchanges the one-time code for a permanent Admin API access token.
-  app.get("/auth/callback", async (req, res) => {
-    const { code, shop } = req.query;
-    if (!code || !shop) return res.status(400).send("Missing code or shop parameters.");
-
-    try {
-      const clientId = process.env.SHOPIFY_APP_CLIENT_ID;
-      const clientSecret = process.env.SHOPIFY_APP_CLIENT_SECRET;
-
-      if (!clientId || !clientSecret) {
-        // Fallback: display the code so it can be exchanged manually
-        return res.send(
-          `<h1>OAuth Code Received</h1><p><b>Shop:</b> ${shop}</p><p><b>Code:</b> <code>${code}</code></p>` +
-          `<p>Set SHOPIFY_APP_CLIENT_ID + SHOPIFY_APP_CLIENT_SECRET in Railway env vars, then reinstall.</p>`
-        );
-      }
-
-      const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code }),
-      });
-
-      const tokenData = await tokenRes.json();
-
-      if (tokenData.access_token) {
-        res.send(
-          `<h1>✅ Shopify Connected!</h1>` +
-          `<p><b>Access Token:</b> <code style="word-break:break-all">${tokenData.access_token}</code></p>` +
-          `<p><b>Scope:</b> ${tokenData.scope}</p>` +
-          `<p>Add <code>SHOPIFY_ADMIN_API_ACCESS_TOKEN=${tokenData.access_token}</code> and ` +
-          `<code>SHOPIFY_STORE_DOMAIN=${shop}</code> to Railway environment variables.</p>`
         );
       } else {
         res.send(`<h1>Token Exchange Error</h1><pre>${JSON.stringify(tokenData, null, 2)}</pre>`);
