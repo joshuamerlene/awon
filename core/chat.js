@@ -8,7 +8,7 @@
  * injected into every system prompt he thinks with.
  */
 
-import { think, thinkJSON, PERSONAS } from "./claude.js";
+import { think, thinkJSON, PERSONAS, BUSINESS_NAME } from "./claude.js";
 import { addFact, addDirective, appendChat, getChat } from "./chatMemory.js";
 import { log } from "./logger.js";
 
@@ -27,7 +27,7 @@ export async function handleChat(message) {
       system: PERSONAS.awon,
       prompt:
         `Josh (your owner) just told you something in your private chat. Extract only what you should REMEMBER going forward.\n` +
-        `- "facts": durable truths about The Rival Is Me (brand, customers, products, pricing, channels, policies, people).\n` +
+        `- "facts": durable truths about ${BUSINESS_NAME} (brand, clients, pricing, channels, policies, people).\n` +
         `- "directives": things you should DO or emphasize for a while (a campaign, a product push, a content focus). ` +
         `If it has a time limit, set durationDays (e.g. "for a week"=7, "this month"=30); if open-ended, null.\n` +
         `Ignore small talk, greetings, and one-off questions. If nothing durable, return empty arrays. ` +

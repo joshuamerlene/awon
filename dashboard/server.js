@@ -32,6 +32,7 @@ import { handleChat } from "../core/chat.js";
 import { getChat, activeMemory, forget as forgetMemory } from "../core/chatMemory.js";
 import { getLog, log } from "../core/logger.js";
 import { loadMemory } from "../core/memory.js";
+import { BUSINESS_MODEL_SUMMARY } from "../core/claude.js";
 import { Ledger } from "../core/ledger.js";
 import * as clients from "../core/clients.js";
 import * as freeTrial from "../core/freeTrial.js";
@@ -53,7 +54,11 @@ const PUBLIC_SITE_ORIGINS = [
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || "therivalisme";
+// Dev-only fallback — Railway production should always set a real
+// DASHBOARD_PASSWORD env var. (Was hardcoded to the retired business's name;
+// changed during the 2026-07-28 deep scrub since a literal old-brand string
+// has no reason to persist as a security-relevant default.)
+const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || "awon-dev-only";
 const PORT = process.env.PORT || 3000;
 // Where new-client-intake alerts go — real prospects were landing silently
 // in the dashboard with nothing pushing Josh to notice. Same failure class
@@ -65,10 +70,6 @@ export function startDashboard() {
   const app = express();
   app.use(express.json());
   app.use(express.static(path.join(__dirname, "public")));
-  // Generated print designs (integrations/design.js) — must be publicly
-  // fetchable (no token) so Printful's mockup generator and order API can
-  // pull the files. Served from the persistent Volume.
-  app.use("/designs", express.static(path.join(__dirname, "..", "data", "designs")));
 
   // CORS for the public marketing site (awonvideo.com) hitting /api/public/*
   // from a browser. Scoped to an explicit origin allowlist, not wide open —
@@ -190,6 +191,8 @@ export function startDashboard() {
       res.json({
         online: true,
         businessName: process.env.BUSINESS_NAME || "Awon",
+        businessModel: BUSINESS_MODEL_SUMMARY,
+        businessLaunchedAt: memory.businessLaunchedAt || null,
         lastCycle: memory.updatedAt,
         cycleCount: memory.cycleCount,
         strategy: memory.strategy,
@@ -579,8 +582,10 @@ export function startDashboard() {
 
   // ── TikTok OAuth (Login Kit v2 / Content Posting API) ───────────────────────
   // Kicks off the real OAuth consent flow to get TIKTOK_CONTENT_ACCESS_TOKEN for
-  // @the.rival.is.me. Required even for unaudited posting — audit status only
-  // controls whether posts land public or SELF_ONLY, not whether OAuth works.
+  // the connected account (optional demo-reel/portfolio channel only — this
+  // business's actual delivery model never depends on it). Required even for
+  // unaudited posting — audit status only controls whether posts land public
+  // or SELF_ONLY, not whether OAuth works.
   app.get("/auth/tiktok", (req, res) => {
     const clientKey = process.env.TIKTOK_APP_KEY;
     if (!clientKey) return res.status(500).send("TIKTOK_APP_KEY not set in Railway env vars.");
