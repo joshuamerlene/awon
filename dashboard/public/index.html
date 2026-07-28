@@ -3,116 +3,97 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AWON</title>
+<title>AWON VIDEO</title>
 <style>
+  /* Palette pulled from awonvideo.com's own brand (near-black + mint-green
+     accent) so the internal operator tool and the public site read as the
+     same company — 2026-07-28 redesign. */
   :root {
-    --bg: #0a0a0a;
-    --surface: #111111;
-    --border: #1e1e1e;
-    --accent: #c8f135;
-    --accent-dim: #8aaa1f;
-    --red: #ff4444;
-    --text: #e8e8e8;
-    --muted: #666;
-    --online: #4ade80;
+    --bg: #08090b;
+    --surface: #111318;
+    --surface-2: #15181f;
+    --border: #1f232b;
+    --accent: #4be8a8;
+    --accent-deep: #29b37e;
+    --accent-soft: rgba(75, 232, 168, 0.1);
+    --red: #ff5c72;
+    --red-soft: rgba(255, 92, 114, 0.1);
+    --amber: #f5a742;
+    --amber-soft: rgba(245, 167, 66, 0.1);
+    --text: #eef1f0;
+    --muted: #7c8790;
+    --online: #4be8a8;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: 'Inter', 'Helvetica Neue', sans-serif; font-size: 14px; min-height: 100vh; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', 'Helvetica Neue', system-ui, sans-serif; font-size: 14px; min-height: 100vh; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
   /* ── Auth overlay ── */
   #auth-overlay { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 999; }
   #auth-overlay.hidden { display: none; }
   .auth-box { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 40px; width: 320px; text-align: center; }
-  .auth-box h2 { color: var(--accent); letter-spacing: 0.2em; font-size: 12px; margin-bottom: 24px; }
+  .auth-box h2 { font-size: 18px; margin-bottom: 24px; }
+  .auth-box h2 .g { color: var(--accent); }
   .auth-box input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 12px 16px; border-radius: 8px; font-size: 14px; margin-bottom: 12px; outline: none; }
   .auth-box input:focus { border-color: var(--accent); }
   .auth-box button { width: 100%; background: var(--accent); color: #000; border: none; padding: 12px; border-radius: 8px; font-weight: 700; cursor: pointer; letter-spacing: 0.05em; }
 
-  /* ── Header ── */
-  header { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); z-index: 100; }
-  .logo { font-size: 11px; font-weight: 700; letter-spacing: 0.3em; color: var(--accent); }
+  /* ── Header (slim) ── */
+  header { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: rgba(8,9,11,0.92); backdrop-filter: blur(6px); z-index: 100; }
+  .logo { font-size: 15px; font-weight: 800; letter-spacing: 0.02em; color: var(--text); }
+  .logo .g { color: var(--accent); }
   .status-pill { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--online); animation: pulse 2s infinite; }
   .dot.offline { background: var(--red); animation: none; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
   .last-cycle { font-size: 11px; color: var(--muted); }
+  .refresh-btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; }
+  .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
 
-  /* ── Identity banner ── */
-  /* Added in the 2026-07-28 deep scrub: the root bug that day was Awon's
-     persisted memory silently re-planning a retired business for a full day
-     with nothing on-screen making that obvious. This banner makes the current
-     business identity and how long it's been running impossible to miss. */
-  .identity-banner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; background: linear-gradient(135deg, #141a0a, var(--surface)); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; padding: 18px 24px; margin: 20px 24px 0; }
-  .identity-name { font-size: 20px; font-weight: 800; letter-spacing: 0.03em; color: var(--text); }
-  .identity-model { font-size: 12px; color: var(--muted); margin-top: 4px; max-width: 560px; line-height: 1.4; }
-  .identity-stats { display: flex; gap: 22px; }
-  .identity-stat { text-align: center; }
-  .identity-stat .n { font-size: 18px; font-weight: 700; color: var(--accent); }
-  .identity-stat .l { font-size: 9px; color: var(--muted); letter-spacing: 0.15em; text-transform: uppercase; margin-top: 2px; }
+  /* ── Vitals strip ── */
+  .vitals { display: flex; align-items: stretch; flex-wrap: wrap; gap: 0; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; margin: 20px 24px 0; overflow: hidden; }
+  .vitals-identity { padding: 16px 22px; flex: 1 1 260px; min-width: 220px; }
+  .vitals-identity .name { font-size: 19px; font-weight: 800; letter-spacing: 0.01em; }
+  .vitals-identity .model { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.4; max-width: 480px; }
+  .vitals-stats { display: flex; flex-wrap: wrap; }
+  .vstat { padding: 16px 20px; text-align: center; border-left: 1px solid var(--border); min-width: 92px; }
+  .vstat .n { font-size: 19px; font-weight: 800; color: var(--accent); }
+  .vstat .n.warn { color: var(--amber); }
+  .vstat .l { font-size: 9px; color: var(--muted); letter-spacing: 0.14em; text-transform: uppercase; margin-top: 3px; }
+  .vstat .bar { width: 64px; height: 4px; background: var(--border); border-radius: 2px; margin: 6px auto 0; overflow: hidden; }
+  .vstat .bar-fill { height: 100%; background: var(--accent); }
 
   /* ── Main grid ── */
-  .grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto auto; gap: 1px; background: var(--border); }
-  @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto; gap: 1px; background: var(--border); margin-top: 1px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  .full { grid-column: 1 / -1; }
 
   /* ── Panels ── */
-  .panel { background: var(--surface); padding: 24px; }
-  .panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
-  .panel-title { font-size: 10px; font-weight: 700; letter-spacing: 0.25em; color: var(--muted); text-transform: uppercase; }
+  .panel { background: var(--surface); padding: 22px 24px; }
+  .panel.hero { background: linear-gradient(160deg, var(--surface-2), var(--surface)); }
+  .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 18px; }
+  .panel-title { font-size: 10px; font-weight: 700; letter-spacing: 0.22em; color: var(--muted); text-transform: uppercase; }
+  .panel-title.accent { color: var(--accent); }
+  .panel-header-actions { display: flex; align-items: center; gap: 8px; }
   .badge { background: var(--red); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 99px; }
   .badge.green { background: var(--online); color: #000; }
+  .mini-btn { background: none; border: 1px solid var(--border); color: var(--muted); font-size: 10px; padding: 4px 10px; border-radius: 5px; cursor: pointer; letter-spacing: 0.03em; }
+  .mini-btn:hover { border-color: var(--red); color: var(--red); }
 
-  /* ── Budget widget ── */
-  .budget-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .budget-item label { font-size: 10px; color: var(--muted); letter-spacing: 0.1em; display: block; margin-bottom: 4px; }
-  .budget-item .value { font-size: 24px; font-weight: 700; color: var(--accent); }
-  .budget-item .value.small { font-size: 16px; color: var(--text); }
-
-  /* ── Strategy ── */
-  .strategy-text { font-size: 14px; line-height: 1.6; color: var(--text); background: var(--bg); border-left: 3px solid var(--accent); padding: 12px 16px; border-radius: 0 8px 8px 0; margin-bottom: 16px; }
+  /* ── Right Now (hero strategy) ── */
+  .strategy-text { font-size: 15px; line-height: 1.6; color: var(--text); background: var(--bg); border-left: 3px solid var(--accent); padding: 14px 18px; border-radius: 0 8px 8px 0; margin-bottom: 14px; }
   .next-actions { display: flex; flex-direction: column; gap: 8px; }
-  .next-action { font-size: 12px; color: var(--muted); padding: 8px 12px; background: var(--bg); border-radius: 6px; border: 1px solid var(--border); }
+  .next-action { font-size: 12px; color: var(--muted); padding: 9px 12px; background: var(--bg); border-radius: 6px; border: 1px solid var(--border); }
+  .next-actions:empty::before { content: 'No queued next actions — check back after the next cycle.'; font-size: 12px; color: var(--muted); }
 
-  /* ── Blockers ── */
-  .blockers-panel { grid-column: 1 / -1; }
-  .no-blockers { text-align: center; padding: 40px; color: var(--muted); font-size: 13px; }
-  .no-blockers span { font-size: 28px; display: block; margin-bottom: 8px; }
-  .blocker-card { background: var(--bg); border: 1px solid #2a1a00; border-left: 3px solid #f59e0b; border-radius: 8px; padding: 20px; margin-bottom: 12px; }
-  .blocker-card.resolved { border-left-color: var(--online); opacity: 0.6; }
-  .blocker-title { font-weight: 700; font-size: 14px; margin-bottom: 8px; color: #f59e0b; }
-  .blocker-card.resolved .blocker-title { color: var(--online); }
-  .blocker-context { font-size: 12px; color: var(--muted); line-height: 1.5; margin-bottom: 16px; }
-  .blocker-options { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-  .option-btn { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; transition: all 0.15s; }
-  .option-btn:hover, .option-btn.selected { background: var(--accent); color: #000; border-color: var(--accent); }
-  .blocker-input { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: 6px; font-size: 13px; resize: vertical; min-height: 60px; outline: none; margin-bottom: 12px; }
-  .blocker-input:focus { border-color: var(--accent); }
-  .resolve-btn { background: var(--accent); color: #000; border: none; padding: 10px 20px; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 13px; }
-  .resolve-btn:hover { opacity: 0.85; }
-  .resolution-display { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; font-size: 12px; color: var(--online); }
-  .blocker-time { font-size: 10px; color: var(--muted); margin-top: 8px; }
-
-  /* ── Activity log ── */
-  .log-feed { display: flex; flex-direction: column; gap: 4px; max-height: 400px; overflow-y: auto; }
-  .log-entry { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); align-items: flex-start; }
-  .log-entry:last-child { border-bottom: none; }
-  .log-type { font-size: 9px; font-weight: 700; letter-spacing: 0.1em; padding: 2px 6px; border-radius: 4px; white-space: nowrap; flex-shrink: 0; margin-top: 1px; }
-  .log-type.action { background: #1a2a1a; color: var(--online); }
-  .log-type.decision { background: #1a1a2a; color: #818cf8; }
-  .log-type.system { background: #1a1a1a; color: var(--muted); }
-  .log-type.error { background: #2a1a1a; color: var(--red); }
-  .log-type.blocker { background: #2a1e00; color: #f59e0b; }
-  .log-type.sub-agent { background: #1a2020; color: #22d3ee; }
-  .log-message { font-size: 12px; color: var(--text); line-height: 1.4; }
-  .log-time { font-size: 10px; color: var(--muted); white-space: nowrap; flex-shrink: 0; margin-left: auto; }
-
-  /* ── Sandbox ── */
-  .sandbox-section { margin-bottom: 20px; }
-  .sandbox-section h4 { font-size: 10px; font-weight: 700; letter-spacing: 0.2em; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; }
-  .learning-item { font-size: 12px; color: var(--text); padding: 8px 12px; background: var(--bg); border-radius: 6px; margin-bottom: 6px; border-left: 2px solid var(--accent-dim); }
-  .learning-time { font-size: 10px; color: var(--muted); display: block; margin-top: 2px; }
-
-  /* ── Budget actions ── */
-  .budget-actions { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+  /* ── Budget ── */
+  .budget-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }
+  @media (max-width: 700px) { .budget-grid { grid-template-columns: 1fr 1fr; } }
+  .budget-item label { font-size: 10px; color: var(--muted); letter-spacing: 0.1em; display: block; margin-bottom: 4px; }
+  .budget-item .value { font-size: 22px; font-weight: 700; color: var(--accent); }
+  .budget-item .value.small { font-size: 15px; color: var(--text); }
+  .budget-actions { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
   .budget-action-row { display: flex; gap: 8px; align-items: center; }
   .budget-action-row input[type="number"] { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 6px; font-size: 13px; outline: none; }
   .budget-action-row input[type="number"]:focus { border-color: var(--accent); }
@@ -122,26 +103,77 @@
   .budget-btn.secondary:hover { border-color: var(--accent); color: var(--accent); }
   .funded-note { font-size: 10px; color: var(--muted); }
 
-  /* ── Notes ── */
-  .notes-panel { grid-column: 1 / -1; }
-  .note-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
-  .note-input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: 6px; font-size: 13px; resize: vertical; min-height: 70px; outline: none; font-family: inherit; }
-  .note-input:focus { border-color: var(--accent); }
-  .note-form-row { display: flex; align-items: center; gap: 12px; }
-  .note-hint { font-size: 11px; color: var(--muted); flex: 1; }
-  .note-list { display: flex; flex-direction: column; gap: 8px; }
-  .note-item { background: var(--bg); border: 1px solid var(--border); border-left: 3px solid var(--muted); border-radius: 6px; padding: 12px 14px; }
-  .note-item.consumed { border-left-color: var(--online); }
-  .note-item .note-text { font-size: 13px; color: var(--text); line-height: 1.5; margin-bottom: 6px; }
-  .note-item .note-meta { font-size: 10px; color: var(--muted); display: flex; justify-content: space-between; }
-  .note-item .note-status { font-weight: 700; letter-spacing: 0.05em; }
-  .note-item.consumed .note-status { color: var(--online); }
-  .note-item:not(.consumed) .note-status { color: #f59e0b; }
-  .note-response { margin-top: 10px; padding: 10px 12px; background: var(--surface); border-left: 2px solid var(--accent); border-radius: 0 6px 6px 0; font-size: 12px; color: var(--text); line-height: 1.5; }
-  .note-response .note-response-label { font-size: 9px; font-weight: 700; letter-spacing: 0.15em; color: var(--accent); text-transform: uppercase; display: block; margin-bottom: 4px; }
+  /* ── Blockers ── */
+  .no-blockers { display: flex; align-items: center; gap: 8px; padding: 10px 4px; color: var(--muted); font-size: 12px; }
+  .no-blockers .ok { color: var(--online); font-size: 15px; }
+  .blocker-card { background: var(--bg); border: 1px solid #2a1e0a; border-left: 3px solid var(--amber); border-radius: 8px; padding: 18px 20px; margin-bottom: 12px; }
+  .blocker-card.resolved { border-left-color: var(--online); opacity: 0.55; }
+  .blocker-title { font-weight: 700; font-size: 13px; margin-bottom: 8px; color: var(--amber); }
+  .blocker-card.resolved .blocker-title { color: var(--online); }
+  .blocker-context { font-size: 12px; color: var(--muted); line-height: 1.5; margin-bottom: 16px; }
+  .blocker-options { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .option-btn { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; transition: all 0.15s; }
+  .option-btn:hover, .option-btn.selected { background: var(--accent); color: #000; border-color: var(--accent); }
+  .blocker-input { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: 6px; font-size: 13px; resize: vertical; min-height: 56px; outline: none; margin-bottom: 12px; }
+  .blocker-input:focus { border-color: var(--accent); }
+  .resolve-btn { background: var(--accent); color: #000; border: none; padding: 10px 20px; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 13px; }
+  .resolve-btn:hover { opacity: 0.85; }
+  .resolution-display { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; font-size: 12px; color: var(--online); }
+  .blocker-time { font-size: 10px; color: var(--muted); margin-top: 8px; }
 
-  /* ── Footage ── */
-  .footage-panel { grid-column: 1 / -1; }
+  /* ── Pipeline (grouped by status) ── */
+  .pipeline-cols { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+  @media (max-width: 1000px) { .pipeline-cols { grid-template-columns: repeat(2, 1fr); } }
+  .pipeline-col { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; min-height: 60px; }
+  .pipeline-col h5 { font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .pipeline-col h5 .n { color: var(--accent); }
+  .pcard { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 8px; font-size: 12px; }
+  .pcard .pname { font-weight: 700; }
+  .pcard .pmeta { color: var(--muted); font-size: 10px; margin-top: 3px; }
+  .pcard .prights { font-size: 10px; margin-top: 6px; }
+  .pcard .prights.ok { color: var(--online); }
+  .pcard .prights.no { color: var(--amber); }
+  .pcard-actions { display: flex; gap: 5px; margin-top: 8px; flex-wrap: wrap; }
+  .pcard-actions .option-btn { padding: 5px 9px; font-size: 10px; }
+  .pipeline-empty { color: var(--muted); font-size: 11px; text-align: center; padding: 8px 2px; }
+  .add-client-form { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-top: 16px; }
+  .add-client-form .label { font-size: 10px; color: var(--muted); letter-spacing: 0.1em; margin-bottom: 10px; }
+  .note-input { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 10px 12px; border-radius: 6px; font-size: 13px; resize: vertical; outline: none; font-family: inherit; }
+  .note-input:focus { border-color: var(--accent); }
+  .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+  .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+
+  /* ── Outreach log ── */
+  .outreach-row { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .outreach-row:last-child { border-bottom: none; }
+  .outreach-chan { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); background: var(--accent-soft); padding: 3px 8px; border-radius: 4px; white-space: nowrap; margin-top: 1px; }
+  .outreach-body { flex: 1; }
+  .outreach-body .oname { font-weight: 700; font-size: 12px; }
+  .outreach-body .osummary { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+  .outreach-time { font-size: 10px; color: var(--muted); white-space: nowrap; }
+
+  /* ── Lessons learned ── */
+  .sandbox-section { margin-bottom: 20px; }
+  .sandbox-section:last-child { margin-bottom: 0; }
+  .sandbox-section h4 { font-size: 10px; font-weight: 700; letter-spacing: 0.2em; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; }
+  .learning-item { font-size: 12px; color: var(--text); padding: 10px 12px; background: var(--bg); border-radius: 6px; margin-bottom: 6px; border-left: 2px solid var(--accent-deep); line-height: 1.5; }
+  .learning-time { font-size: 10px; color: var(--muted); display: block; margin-top: 4px; }
+
+  /* ── Activity log ── */
+  .log-feed { display: flex; flex-direction: column; gap: 4px; max-height: 380px; overflow-y: auto; }
+  .log-entry { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); align-items: flex-start; }
+  .log-entry:last-child { border-bottom: none; }
+  .log-type { font-size: 9px; font-weight: 700; letter-spacing: 0.1em; padding: 2px 6px; border-radius: 4px; white-space: nowrap; flex-shrink: 0; margin-top: 1px; }
+  .log-type.action { background: var(--accent-soft); color: var(--online); }
+  .log-type.decision { background: #1a1a2a; color: #818cf8; }
+  .log-type.system { background: #1a1a1a; color: var(--muted); }
+  .log-type.error { background: var(--red-soft); color: var(--red); }
+  .log-type.blocker { background: var(--amber-soft); color: var(--amber); }
+  .log-type.sub-agent { background: #1a2020; color: #22d3ee; }
+  .log-message { font-size: 12px; color: var(--text); line-height: 1.4; }
+  .log-time { font-size: 10px; color: var(--muted); white-space: nowrap; flex-shrink: 0; margin-left: auto; }
+
+  /* ── Footage / Clips (shared list style) ── */
   .footage-drop { border: 1px dashed var(--border); border-radius: 8px; padding: 20px; text-align: center; margin-bottom: 16px; }
   .footage-drop input[type="file"] { color: var(--muted); font-size: 12px; }
   .footage-list { display: flex; flex-direction: column; gap: 6px; }
@@ -150,8 +182,7 @@
   .footage-item .footage-meta { color: var(--muted); font-size: 10px; }
 
   /* ── Chat (Talk to Awon) ── */
-  .chat-panel { grid-column: 1 / -1; }
-  .chat-thread { display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow-y: auto; padding: 4px 2px; margin-bottom: 14px; }
+  .chat-thread { display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto; padding: 4px 2px; margin-bottom: 14px; }
   .chat-bubble { max-width: 78%; padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
   .chat-bubble.josh { align-self: flex-end; background: var(--accent); color: #000; border-bottom-right-radius: 3px; }
   .chat-bubble.awon { align-self: flex-start; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-bottom-left-radius: 3px; }
@@ -162,20 +193,31 @@
   .chat-send { background: var(--accent); color: #000; border: none; padding: 0 20px; border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 13px; }
   .chat-send:disabled { opacity: 0.5; cursor: wait; }
   .chat-hint { font-size: 11px; color: var(--muted); margin-top: 8px; }
-  .chat-saved { font-size: 11px; color: var(--accent-dim); margin-top: 6px; display: none; }
+  .chat-saved { font-size: 11px; color: var(--accent-deep); margin-top: 6px; display: none; }
 
   /* ── What Awon Knows ── */
-  .memory-item { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; background: var(--bg); border: 1px solid var(--border); border-left: 2px solid var(--accent-dim); border-radius: 6px; padding: 9px 12px; margin-bottom: 6px; }
-  .memory-item.directive { border-left-color: #f59e0b; }
+  .memory-item { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; background: var(--bg); border: 1px solid var(--border); border-left: 2px solid var(--accent-deep); border-radius: 6px; padding: 9px 12px; margin-bottom: 6px; }
+  .memory-item.directive { border-left-color: var(--amber); }
   .memory-item .memory-text { font-size: 12px; color: var(--text); line-height: 1.5; }
   .memory-item .memory-until { font-size: 10px; color: var(--muted); display: block; margin-top: 2px; }
   .memory-forget { background: none; border: 1px solid var(--border); color: var(--muted); font-size: 10px; padding: 3px 8px; border-radius: 5px; cursor: pointer; flex-shrink: 0; }
   .memory-forget:hover { border-color: var(--red); color: var(--red); }
   .memory-empty { color: var(--muted); text-align: center; padding: 12px; font-size: 12px; }
 
-  /* ── Refresh ── */
-  .refresh-btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; }
-  .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+  /* ── Notes (mailbox) ── */
+  .note-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+  .note-form-row { display: flex; align-items: center; gap: 12px; }
+  .note-hint { font-size: 11px; color: var(--muted); flex: 1; }
+  .note-list { display: flex; flex-direction: column; gap: 8px; }
+  .note-item { background: var(--bg); border: 1px solid var(--border); border-left: 3px solid var(--muted); border-radius: 6px; padding: 12px 14px; }
+  .note-item.consumed { border-left-color: var(--online); }
+  .note-item .note-text { font-size: 13px; color: var(--text); line-height: 1.5; margin-bottom: 6px; }
+  .note-item .note-meta { font-size: 10px; color: var(--muted); display: flex; justify-content: space-between; }
+  .note-item .note-status { font-weight: 700; letter-spacing: 0.05em; }
+  .note-item.consumed .note-status { color: var(--online); }
+  .note-item:not(.consumed) .note-status { color: var(--amber); }
+  .note-response { margin-top: 10px; padding: 10px 12px; background: var(--surface); border-left: 2px solid var(--accent); border-radius: 0 6px 6px 0; font-size: 12px; color: var(--text); line-height: 1.5; }
+  .note-response .note-response-label { font-size: 9px; font-weight: 700; letter-spacing: 0.15em; color: var(--accent); text-transform: uppercase; display: block; margin-bottom: 4px; }
 </style>
 </head>
 <body>
@@ -183,16 +225,16 @@
 <!-- Auth -->
 <div id="auth-overlay">
   <div class="auth-box">
-    <h2>AWON</h2>
+    <h2>AWON <span class="g">VIDEO</span></h2>
     <input type="password" id="auth-input" placeholder="Dashboard password" />
     <button onclick="login()">Enter</button>
-    <p id="auth-error" style="color:#ff4444;font-size:12px;margin-top:12px;display:none;">Wrong password.</p>
+    <p id="auth-error" style="color:#ff5c72;font-size:12px;margin-top:12px;display:none;">Wrong password.</p>
   </div>
 </div>
 
 <!-- Header -->
 <header>
-  <div class="logo">AWON OPERATIONS</div>
+  <div class="logo">AWON <span class="g">VIDEO</span></div>
   <div style="display:flex;align-items:center;gap:20px;">
     <div class="status-pill">
       <div class="dot" id="status-dot"></div>
@@ -207,25 +249,94 @@
 <!-- Main content (hidden until auth) -->
 <div id="main-content" style="display:none;">
 
-  <!-- Identity banner — always says what business this is and how long it's run -->
-  <div class="identity-banner">
-    <div>
-      <div class="identity-name" id="identity-name">Loading…</div>
-      <div class="identity-model" id="identity-model"></div>
+  <!-- Vitals strip: identity + at-a-glance numbers in one compact row -->
+  <div class="vitals">
+    <div class="vitals-identity">
+      <div class="name" id="identity-name">Loading…</div>
+      <div class="model" id="identity-model"></div>
     </div>
-    <div class="identity-stats">
-      <div class="identity-stat"><div class="n" id="identity-cycles">—</div><div class="l">Cycles</div></div>
-      <div class="identity-stat"><div class="n" id="identity-days">—</div><div class="l">Days Live</div></div>
-      <div class="identity-stat"><div class="n" id="identity-clients">—</div><div class="l">Active Clients</div></div>
+    <div class="vitals-stats">
+      <div class="vstat"><div class="n" id="identity-cycles">—</div><div class="l">Cycles</div></div>
+      <div class="vstat"><div class="n" id="identity-days">—</div><div class="l">Days Live</div></div>
+      <div class="vstat"><div class="n" id="identity-clients">—</div><div class="l">Active Clients</div></div>
+      <div class="vstat"><div class="n" id="vstat-budget">—</div><div class="l">Budget</div></div>
+      <div class="vstat">
+        <div class="n" id="vstat-trial">—</div><div class="l">Free Trial</div>
+        <div class="bar"><div class="bar-fill" id="vstat-trial-bar" style="width:0%;"></div></div>
+      </div>
     </div>
   </div>
 
-  <!-- Budget + Strategy row -->
   <div class="grid">
-    <div class="panel">
+
+    <!-- Right Now — what Awon is doing and why, first thing you see -->
+    <div class="panel hero full">
       <div class="panel-header">
-        <span class="panel-title">Budget</span>
+        <span class="panel-title accent">Right Now</span>
         <span id="cycle-badge" class="badge green">Cycle #0</span>
+      </div>
+      <div class="strategy-text" id="strategy-text">Loading...</div>
+      <div class="next-actions" id="next-actions"></div>
+    </div>
+
+    <!-- Needs Your Input -->
+    <div class="panel full">
+      <div class="panel-header">
+        <span class="panel-title">Needs Your Input</span>
+        <div class="panel-header-actions">
+          <span class="badge" id="blocker-badge" style="display:none;"></span>
+          <button class="mini-btn" onclick="clearAllBlockersUI()">Clear all</button>
+        </div>
+      </div>
+      <div id="blockers-container">
+        <div class="no-blockers"><span class="ok">✓</span>No blockers. Awon is running free.</div>
+      </div>
+    </div>
+
+    <!-- Client Pipeline — grouped by stage -->
+    <div class="panel full">
+      <div class="panel-header">
+        <span class="panel-title">Client Pipeline</span>
+        <span class="badge green" id="client-count-badge">0</span>
+      </div>
+      <div class="pipeline-cols" id="pipeline-cols">
+        <!-- filled by loadClients() -->
+      </div>
+      <div class="add-client-form">
+        <div class="label">ADD A PROSPECT OR CLIENT MANUALLY</div>
+        <div class="form-row-2">
+          <input class="note-input" id="client-name-input" placeholder="Name" />
+          <input class="note-input" id="client-email-input" placeholder="Contact email (optional)" />
+        </div>
+        <div class="form-row-3">
+          <select class="note-input" id="client-deal-input">
+            <option value="">Deal type (optional)</option>
+            <option value="project">Project fee</option>
+            <option value="per-clip">Per-clip rate</option>
+            <option value="retainer">Monthly retainer</option>
+          </select>
+          <input class="note-input" id="client-rate-input" type="number" min="0" step="1" placeholder="Rate $ (optional)" />
+          <input class="note-input" id="client-source-input" placeholder="Source (optional)" />
+        </div>
+        <textarea class="note-input" id="client-notes-input" placeholder="Notes (optional)" rows="2"></textarea>
+        <div style="margin-top:10px;"><button class="resolve-btn" onclick="addClient()">Add to Pipeline</button></div>
+      </div>
+    </div>
+
+    <!-- Outreach Log — what was actually sent, to whom, when -->
+    <div class="panel full">
+      <div class="panel-header">
+        <span class="panel-title">Outreach Log</span>
+      </div>
+      <div id="outreach-container">
+        <div style="color:var(--muted);text-align:center;padding:20px;font-size:12px;">Loading...</div>
+      </div>
+    </div>
+
+    <!-- Budget & Ledger — combined -->
+    <div class="panel full">
+      <div class="panel-header">
+        <span class="panel-title">Budget &amp; Ledger</span>
       </div>
       <div class="budget-grid">
         <div class="budget-item">
@@ -259,42 +370,47 @@
           <button class="budget-btn secondary" onclick="clearPayout()" style="width:100%;">Mark Payout Received →</button>
         </div>
       </div>
+      <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border);">
+        <div class="panel-title" style="margin-bottom:12px;">Spend &amp; Revenue History</div>
+        <div class="log-feed" id="ledger-container" style="max-height:280px;">
+          <div style="color:var(--muted);text-align:center;padding:20px;">Loading...</div>
+        </div>
+      </div>
     </div>
 
+    <!-- Clip Delivery Queue -->
     <div class="panel">
       <div class="panel-header">
-        <span class="panel-title">Awon's Current Focus</span>
+        <span class="panel-title">Clip Delivery Queue</span>
       </div>
-      <div class="strategy-text" id="strategy-text">Loading...</div>
-      <div class="next-actions" id="next-actions"></div>
+      <div class="footage-list" id="clips-container">
+        <div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No clips produced yet.</div>
+      </div>
     </div>
 
-    <!-- Ledger / Spend History (full width) -->
-    <div class="panel blockers-panel">
+    <!-- Portfolio Footage -->
+    <div class="panel">
       <div class="panel-header">
-        <span class="panel-title">Spend &amp; Revenue History</span>
+        <span class="panel-title">Portfolio Footage (Demo Reel)</span>
       </div>
-      <div class="log-feed" id="ledger-container" style="max-height:300px;">
-        <div style="color:var(--muted);text-align:center;padding:20px;">Loading...</div>
+      <div class="footage-drop">
+        <input type="file" id="footage-input" accept=".mp4,.mov,.m4v,.zip" multiple />
+        <button class="resolve-btn" onclick="uploadFootage()" style="margin-left:12px;">Upload</button>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px;">mp4, mov, m4v — up to 500MB each, 50 at a time. Or drop a .zip and every video inside gets imported. This is Awon's own sample/demo footage, not client work (that's the Client Pipeline panel above) — cut into a portfolio reel to show prospects the editing quality before they commit.</div>
       </div>
-    </div>
-
-    <!-- Blockers (full width) -->
-    <div class="panel blockers-panel">
-      <div class="panel-header">
-        <span class="panel-title">Needs Your Input</span>
-        <span class="badge" id="blocker-badge" style="display:none;"></span>
-      </div>
-      <div id="blockers-container">
-        <div class="no-blockers"><span>✓</span>No blockers. Awon is running free.</div>
+      <div class="footage-list" id="footage-container">
+        <div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No footage uploaded yet.</div>
       </div>
     </div>
 
-    <!-- Talk to Awon (live chat + living memory, ported from Ally) -->
-    <div class="panel chat-panel">
+    <!-- Talk to Awon -->
+    <div class="panel full">
       <div class="panel-header">
         <span class="panel-title">Talk To Awon</span>
-        <span class="badge green">Live</span>
+        <div class="panel-header-actions">
+          <span class="badge green">Live</span>
+          <button class="mini-btn" onclick="clearChatUI()">Clear conversation</button>
+        </div>
       </div>
       <div class="chat-thread" id="chat-thread">
         <div class="memory-empty">Say something — Awon replies instantly, and anything durable you tell him becomes part of how he runs the business.</div>
@@ -308,7 +424,7 @@
     </div>
 
     <!-- What Awon Knows -->
-    <div class="panel" style="grid-column: 1 / -1;">
+    <div class="panel full">
       <div class="panel-header">
         <span class="panel-title">What Awon Knows</span>
       </div>
@@ -317,58 +433,15 @@
       </div>
     </div>
 
-    <!-- Clients / Pipeline -->
-    <div class="panel footage-panel">
+    <!-- Lessons Learned (promoted from the old "Sandbox" panel — this is the
+         running record of what the self-critique loop has actually locked
+         in, meant to be read, not buried in the raw log) -->
+    <div class="panel">
       <div class="panel-header">
-        <span class="panel-title">Client Pipeline</span>
-        <span class="badge green" id="client-count-badge">0</span>
+        <span class="panel-title">Lessons Learned</span>
       </div>
-      <div class="footage-drop" style="text-align:left;">
-        <div style="font-size:10px;color:var(--muted);letter-spacing:0.1em;margin-bottom:10px;">ADD A PROSPECT OR CLIENT MANUALLY</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-          <input class="note-input" style="min-height:auto;padding:10px 12px;" id="client-name-input" placeholder="Name" />
-          <input class="note-input" style="min-height:auto;padding:10px 12px;" id="client-email-input" placeholder="Contact email (optional)" />
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
-          <select class="note-input" style="min-height:auto;padding:10px 12px;" id="client-deal-input">
-            <option value="">Deal type (optional)</option>
-            <option value="project">Project fee</option>
-            <option value="per-clip">Per-clip rate</option>
-            <option value="retainer">Monthly retainer</option>
-          </select>
-          <input class="note-input" style="min-height:auto;padding:10px 12px;" id="client-rate-input" type="number" min="0" step="1" placeholder="Rate $ (optional)" />
-          <input class="note-input" style="min-height:auto;padding:10px 12px;" id="client-source-input" placeholder="Source (optional)" />
-        </div>
-        <textarea class="note-input" id="client-notes-input" placeholder="Notes (optional)" rows="2"></textarea>
-        <div style="margin-top:8px;"><button class="resolve-btn" onclick="addClient()">Add to Pipeline</button></div>
-      </div>
-      <div class="footage-list" id="clients-container">
-        <div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No clients yet.</div>
-      </div>
-    </div>
-
-    <!-- Clip Delivery Queue -->
-    <div class="panel footage-panel">
-      <div class="panel-header">
-        <span class="panel-title">Clip Delivery Queue</span>
-      </div>
-      <div class="footage-list" id="clips-container">
-        <div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No clips produced yet.</div>
-      </div>
-    </div>
-
-    <!-- Raw Footage -->
-    <div class="panel footage-panel">
-      <div class="panel-header">
-        <span class="panel-title">Portfolio Footage (Demo Reel)</span>
-      </div>
-      <div class="footage-drop">
-        <input type="file" id="footage-input" accept=".mp4,.mov,.m4v,.zip" multiple />
-        <button class="resolve-btn" onclick="uploadFootage()" style="margin-left:12px;">Upload</button>
-        <div style="font-size:11px;color:var(--muted);margin-top:8px;">mp4, mov, m4v — up to 500MB each, 50 at a time. Or drop a .zip and every video inside gets imported. This is for Awon's OWN sample/demo footage — not client work, which flows through the Client Pipeline panel below instead. Awon cuts these into a portfolio reel to show prospects the editing quality before they commit.</div>
-      </div>
-      <div class="footage-list" id="footage-container">
-        <div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No footage uploaded yet.</div>
+      <div id="sandbox-container">
+        <div style="color:var(--muted);text-align:center;padding:20px;">Loading...</div>
       </div>
     </div>
 
@@ -382,15 +455,6 @@
       </div>
     </div>
 
-    <!-- Sandbox -->
-    <div class="panel">
-      <div class="panel-header">
-        <span class="panel-title">Awon's Sandbox</span>
-      </div>
-      <div id="sandbox-container">
-        <div style="color:var(--muted);text-align:center;padding:20px;">Loading...</div>
-      </div>
-    </div>
   </div>
 
 </div>
@@ -433,6 +497,10 @@ function relativeTime(iso) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 async function loadStatus() {
   try {
     const s = await apiFetch("/api/status");
@@ -442,7 +510,6 @@ async function loadStatus() {
     document.getElementById("last-cycle").textContent = `Last cycle ${relativeTime(s.lastCycle)}`;
     if (s.businessName) {
       document.title = `AWON · ${s.businessName}`;
-      document.querySelector(".logo").textContent = `AWON · ${s.businessName.toUpperCase()} OPERATIONS`;
     }
     document.getElementById("identity-name").textContent = s.businessName || "Awon";
     document.getElementById("identity-model").textContent = s.businessModel || "";
@@ -452,6 +519,7 @@ async function loadStatus() {
       : "—";
     document.getElementById("identity-clients").textContent = s.activeClientCount ?? "—";
     document.getElementById("cycle-badge").textContent = `Cycle #${s.cycleCount || 0}`;
+
     document.getElementById("budget-available").textContent = `$${s.budget.availableBudgetUsd}`;
     document.getElementById("budget-adcap").textContent = `$${s.budget.adCapUsd}`;
     document.getElementById("budget-profit").textContent = `$${s.budget.cumulativeNetProfitUsd}`;
@@ -459,11 +527,21 @@ async function loadStatus() {
     document.getElementById("budget-spent").textContent = `$${s.budget.cumulativeSpendUsd ?? 0}`;
     document.getElementById("funded-total").textContent = `You've funded $${s.budget.cumulativeFundedUsd ?? 0} total`;
     document.getElementById("clear-payout-row").style.display = s.budget.ownerPayoutOwedUsd > 0 ? "flex" : "none";
+    document.getElementById("vstat-budget").textContent = `$${s.budget.availableBudgetUsd}`;
+
     document.getElementById("strategy-text").textContent = s.strategy || "Initializing...";
     document.getElementById("tiktok-connect-link").style.display = s.tiktokConnected ? "none" : "inline-block";
 
     const nextEl = document.getElementById("next-actions");
-    nextEl.innerHTML = (s.nextActions || []).map(a => `<div class="next-action">→ ${a}</div>`).join("");
+    nextEl.innerHTML = (s.nextActions || []).map(a => `<div class="next-action">→ ${escapeHtml(a)}</div>`).join("");
+
+    if (s.freeTrial) {
+      const ft = s.freeTrial;
+      document.getElementById("vstat-trial").textContent = `${ft.used}/${ft.limit}`;
+      document.getElementById("vstat-trial").className = ft.open ? "n" : "n warn";
+      const pct = ft.limit ? Math.min(100, Math.round((ft.used / ft.limit) * 100)) : 0;
+      document.getElementById("vstat-trial-bar").style.width = `${pct}%`;
+    }
   } catch (e) {
     if (e.message !== "Unauthorized") {
       document.getElementById("status-dot").className = "dot offline";
@@ -487,21 +565,21 @@ async function loadBlockers() {
     }
 
     if (blockers.length === 0) {
-      container.innerHTML = `<div class="no-blockers"><span>✓</span>No blockers. Awon is running free.</div>`;
+      container.innerHTML = `<div class="no-blockers"><span class="ok">✓</span>No blockers. Awon is running free.</div>`;
       return;
     }
 
     container.innerHTML = pending.concat(blockers.filter(b => b.resolution).slice(0, 3))
       .map(b => `
       <div class="blocker-card ${b.resolution ? 'resolved' : ''}" id="card-${b.id}">
-        <div class="blocker-title">${b.title}</div>
-        <div class="blocker-context">${b.context}</div>
+        <div class="blocker-title">${escapeHtml(b.title)}</div>
+        <div class="blocker-context">${escapeHtml(b.context)}</div>
         ${b.resolution ? `
-          <div class="resolution-display">✓ Resolved: ${b.resolution}</div>
+          <div class="resolution-display">✓ Resolved: ${escapeHtml(b.resolution)}</div>
         ` : `
           ${b.options?.length ? `
             <div class="blocker-options">
-              ${b.options.map(o => `<button class="option-btn" onclick="selectOption('${b.id}', this, '${o.replace(/'/g,"\\'")}')">  ${o}</button>`).join("")}
+              ${b.options.map(o => `<button class="option-btn" onclick="selectOption('${b.id}', this, '${o.replace(/'/g,"\\'")}')">  ${escapeHtml(o)}</button>`).join("")}
             </div>
           ` : ""}
           <textarea class="blocker-input" id="input-${b.id}" placeholder="Type your response or select an option above..."></textarea>
@@ -533,6 +611,14 @@ async function resolve(id) {
   } catch(e) { alert("Failed to resolve. Try again."); }
 }
 
+async function clearAllBlockersUI() {
+  if (!confirm("Clear the entire blocker queue? This removes every blocker, pending and resolved — not just marking them done.")) return;
+  try {
+    await fetch("/api/blockers/clear-all", { method: "POST", headers: { "x-dashboard-token": TOKEN } });
+    loadBlockers();
+  } catch(e) { alert("Failed to clear. Try again."); }
+}
+
 async function addFunds() {
   const input = document.getElementById("add-funds-input");
   const amount = parseFloat(input.value);
@@ -546,6 +632,7 @@ async function addFunds() {
     if (!res.ok) throw new Error();
     input.value = "";
     loadStatus();
+    loadLedger();
   } catch(e) { alert("Failed to add funds. Try again."); }
 }
 
@@ -557,6 +644,7 @@ async function clearPayout() {
       headers: { "Content-Type": "application/json", "x-dashboard-token": TOKEN },
     });
     loadStatus();
+    loadLedger();
   } catch(e) { alert("Failed to clear payout. Try again."); }
 }
 
@@ -576,7 +664,7 @@ async function loadFootage() {
     }
     container.innerHTML = files.map(f => `
       <div class="footage-item">
-        <span class="footage-name">${f.filename}</span>
+        <span class="footage-name">${escapeHtml(f.filename)}</span>
         <span class="footage-meta">${formatBytes(f.sizeBytes)} · ${relativeTime(f.uploadedAt)}</span>
       </div>
     `).join("");
@@ -592,7 +680,6 @@ async function uploadFootage() {
   const videos = files.filter(f => !/\.zip$/i.test(f.name));
 
   try {
-    // Zip archives (e.g. TikTok data export) go to the bulk-import endpoint one at a time
     for (const zip of zips) {
       const zipForm = new FormData();
       zipForm.append("archive", zip);
@@ -647,47 +734,59 @@ async function loadLedger() {
   } catch(e) {}
 }
 
+const PIPELINE_STAGES = [
+  { key: "prospect", label: "Prospect" },
+  { key: "contacted", label: "Contacted" },
+  { key: "negotiating", label: "Negotiating" },
+  { key: "active", label: "Active" },
+  { key: "churned", label: "Churned" },
+];
+
+function renderClientCard(c) {
+  return `
+    <div class="pcard">
+      <div class="pname">${escapeHtml(c.name)}</div>
+      <div class="pmeta">${c.dealType ? `${c.dealType}${c.rateUsd ? ` · $${c.rateUsd}` : ""}` : "no deal set"} · ${c.clipsDelivered || 0} delivered · $${(c.totalPaidUsd || 0).toFixed(0)} paid</div>
+      <div class="prights ${c.rightsAuthorized ? "ok" : "no"}">${c.rightsAuthorized ? "✓ Rights authorized" : "⚠ Rights not authorized"}</div>
+      <div class="pcard-actions">
+        ${!c.rightsAuthorized ? `<button class="option-btn" onclick="authorizeRights('${c.id}')">Authorize Rights</button>` : ""}
+        <button class="option-btn" onclick="toggleEditDeal('${c.id}')">Edit Deal</button>
+      </div>
+      <div id="edit-deal-${c.id}" style="display:none;margin-top:8px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;">
+          <select class="note-input" style="padding:6px 8px;font-size:11px;" id="edit-status-${c.id}">
+            ${["prospect","contacted","negotiating","active","churned"].map(s => `<option value="${s}" ${c.status === s ? "selected" : ""}>${s}</option>`).join("")}
+          </select>
+          <select class="note-input" style="padding:6px 8px;font-size:11px;" id="edit-dealtype-${c.id}">
+            <option value="">Deal type</option>
+            ${["project","per-clip","retainer"].map(t => `<option value="${t}" ${c.dealType === t ? "selected" : ""}>${t}</option>`).join("")}
+          </select>
+          <input class="note-input" style="padding:6px 8px;font-size:11px;" id="edit-rate-${c.id}" type="number" min="0" step="1" value="${c.rateUsd || ""}" placeholder="Rate $" />
+        </div>
+        <button class="resolve-btn" onclick="saveDeal('${c.id}')" style="padding:6px 14px;font-size:11px;">Save</button>
+      </div>
+      <div style="display:flex;gap:5px;margin-top:8px;">
+        <input class="note-input" style="padding:6px 8px;font-size:11px;" id="footage-url-${c.id}" placeholder="Footage URL (YouTube/Drive)" />
+        <button class="option-btn" onclick="addFootageUrl('${c.id}')" style="white-space:nowrap;padding:5px 9px;font-size:10px;">Add</button>
+      </div>
+    </div>
+  `;
+}
+
 async function loadClients() {
   try {
     const clients = await apiFetch("/api/clients");
     document.getElementById("client-count-badge").textContent = clients.length;
-    const container = document.getElementById("clients-container");
-    if (clients.length === 0) {
-      container.innerHTML = `<div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No clients yet.</div>`;
-      return;
-    }
-    container.innerHTML = clients.slice().reverse().map(c => `
-      <div class="footage-item" style="flex-direction:column;align-items:stretch;gap:8px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span class="footage-name"><strong>${escapeHtml(c.name)}</strong> <span style="color:var(--muted);">· ${c.status}</span>${c.dealType ? ` · ${c.dealType}${c.rateUsd ? ` $${c.rateUsd}` : ""}` : ""}</span>
-          <span class="footage-meta">${c.clipsDelivered || 0} delivered · $${(c.totalPaidUsd || 0).toFixed(0)} paid</span>
+    const cols = document.getElementById("pipeline-cols");
+    cols.innerHTML = PIPELINE_STAGES.map(stage => {
+      const inStage = clients.filter(c => c.status === stage.key).slice().reverse();
+      return `
+        <div class="pipeline-col">
+          <h5>${stage.label} <span class="n">${inStage.length}</span></h5>
+          ${inStage.length ? inStage.map(renderClientCard).join("") : `<div class="pipeline-empty">—</div>`}
         </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-          <span style="font-size:11px;${c.rightsAuthorized ? "color:var(--online);" : "color:#f59e0b;"}">${c.rightsAuthorized ? "✓ Rights authorized" : "⚠ Rights NOT authorized — footage won't be cut"}</span>
-          <div style="display:flex;gap:6px;">
-            ${!c.rightsAuthorized ? `<button class="option-btn" onclick="authorizeRights('${c.id}')">Authorize Rights</button>` : ""}
-            <button class="option-btn" onclick="toggleEditDeal('${c.id}')">Edit Deal</button>
-          </div>
-        </div>
-        <div id="edit-deal-${c.id}" style="display:none;">
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;">
-            <select class="note-input" style="min-height:auto;padding:8px 10px;font-size:11px;" id="edit-status-${c.id}">
-              ${["prospect","contacted","negotiating","active","churned"].map(s => `<option value="${s}" ${c.status === s ? "selected" : ""}>${s}</option>`).join("")}
-            </select>
-            <select class="note-input" style="min-height:auto;padding:8px 10px;font-size:11px;" id="edit-dealtype-${c.id}">
-              <option value="">Deal type</option>
-              ${["project","per-clip","retainer"].map(t => `<option value="${t}" ${c.dealType === t ? "selected" : ""}>${t}</option>`).join("")}
-            </select>
-            <input class="note-input" style="min-height:auto;padding:8px 10px;font-size:11px;" id="edit-rate-${c.id}" type="number" min="0" step="1" value="${c.rateUsd || ""}" placeholder="Rate $" />
-          </div>
-          <button class="resolve-btn" onclick="saveDeal('${c.id}')">Save</button>
-        </div>
-        <div style="display:flex;gap:6px;">
-          <input class="note-input" style="min-height:auto;padding:8px 10px;font-size:11px;" id="footage-url-${c.id}" placeholder="Footage URL (YouTube or Google Drive link — not Dropbox, Vizard doesn't support it)" />
-          <button class="option-btn" onclick="addFootageUrl('${c.id}')" style="white-space:nowrap;">Add Footage</button>
-        </div>
-      </div>
-    `).join("");
+      `;
+    }).join("");
   } catch(e) {}
 }
 
@@ -761,6 +860,27 @@ async function addFootageUrl(id) {
   } catch(e) { alert("Failed to add footage URL. Try again."); }
 }
 
+async function loadOutreach() {
+  try {
+    const rows = await apiFetch("/api/outreach");
+    const container = document.getElementById("outreach-container");
+    if (!rows.length) {
+      container.innerHTML = `<div style="color:var(--muted);text-align:center;padding:20px;font-size:12px;">No outreach sent yet — Awon logs each real contact attempt here.</div>`;
+      return;
+    }
+    container.innerHTML = rows.map(o => `
+      <div class="outreach-row">
+        <span class="outreach-chan">${escapeHtml(o.channel || "contact")}</span>
+        <div class="outreach-body">
+          <div class="oname">${escapeHtml(o.clientName)} <span style="color:var(--muted);font-weight:400;">· ${escapeHtml(o.clientStatus)}</span></div>
+          <div class="osummary">${escapeHtml(o.summary || "")}</div>
+        </div>
+        <span class="outreach-time">${relativeTime(o.date)}</span>
+      </div>
+    `).join("");
+  } catch(e) {}
+}
+
 async function loadClips() {
   try {
     const data = await apiFetch("/api/clips");
@@ -807,14 +927,10 @@ async function rejectClipItem(id) {
   } catch(e) { alert("Failed. Try again."); }
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
 function renderChat(turns) {
   const thread = document.getElementById("chat-thread");
   if (!turns.length) {
-    thread.innerHTML = `<div class="memory-empty">Say something — Awon replies instantly, and anything durable you tell him becomes part of how he runs the store.</div>`;
+    thread.innerHTML = `<div class="memory-empty">Say something — Awon replies instantly, and anything durable you tell him becomes part of how he runs the business.</div>`;
     return;
   }
   thread.innerHTML = turns.map(t => `
@@ -827,6 +943,14 @@ async function loadChat() {
   try {
     renderChat(await apiFetch("/api/chat"));
   } catch(e) {}
+}
+
+async function clearChatUI() {
+  if (!confirm("Clear the whole conversation thread? Facts and directives you've given Awon are kept — this only wipes the message history.")) return;
+  try {
+    await fetch("/api/chat/clear", { method: "POST", headers: { "x-dashboard-token": TOKEN } });
+    loadChat();
+  } catch(e) { alert("Failed to clear. Try again."); }
 }
 
 async function sendChat() {
@@ -906,7 +1030,7 @@ async function loadLog() {
     document.getElementById("log-feed").innerHTML = entries.map(e => `
       <div class="log-entry">
         <span class="log-type ${e.type}">${e.type}</span>
-        <span class="log-message">${e.message}</span>
+        <span class="log-message">${escapeHtml(e.message)}</span>
         <span class="log-time">${relativeTime(e.timestamp)}</span>
       </div>
     `).join("") || `<div style="color:var(--muted);text-align:center;padding:20px;">No activity yet.</div>`;
@@ -918,38 +1042,39 @@ async function loadSandbox() {
     const m = await apiFetch("/api/memory");
     const container = document.getElementById("sandbox-container");
     container.innerHTML = `
+      ${m.learnings?.length ? `
+        <div class="sandbox-section">
+          <h4>Confirmed Learnings</h4>
+          ${m.learnings.slice(0, 8).map(l => `
+            <div class="learning-item">
+              ${escapeHtml(l.insight)}
+              <span class="learning-time">${relativeTime(l.date)}</span>
+            </div>
+          `).join("")}
+        </div>
+      ` : ""}
       ${m.experiments?.filter(e => e.status === "active").length ? `
         <div class="sandbox-section">
           <h4>Active Experiments (${m.experiments.filter(e=>e.status==="active").length})</h4>
           ${m.experiments.filter(e=>e.status==="active").map(e => `
-            <div class="learning-item">${e.hypothesis || e.description || "Experiment"}</div>
-          `).join("")}
-        </div>
-      ` : ""}
-      ${m.learnings?.length ? `
-        <div class="sandbox-section">
-          <h4>Confirmed Learnings</h4>
-          ${m.learnings.slice(0, 6).map(l => `
-            <div class="learning-item">
-              ${l.insight}
-              <span class="learning-time">${relativeTime(l.date)}</span>
-            </div>
+            <div class="learning-item">${escapeHtml(e.hypothesis || e.description || "Experiment")}</div>
           `).join("")}
         </div>
       ` : ""}
       ${m.contentNotes?.workingFormats?.length ? `
         <div class="sandbox-section">
           <h4>Content Insights</h4>
-          ${m.contentNotes.workingFormats.map(f => `<div class="learning-item">${f}</div>`).join("")}
+          ${m.contentNotes.workingFormats.map(f => `<div class="learning-item">${escapeHtml(f)}</div>`).join("")}
         </div>
-      ` : `<div style="color:var(--muted);font-size:12px;">Sandbox builds as Awon learns. Check back after the first few cycles.</div>`}
+      ` : ""}
+      ${(!m.learnings?.length && !m.experiments?.filter(e=>e.status==="active").length && !m.contentNotes?.workingFormats?.length) ? `<div style="color:var(--muted);font-size:12px;">Builds up as Awon learns — check back after the first few cycles.</div>` : ""}
     `;
   } catch(e) {}
 }
 
 async function loadAll() {
   await loadStatus();
-  await Promise.all([loadBlockers(), loadChat(), loadMemory(), loadLog(), loadSandbox(), loadFootage(), loadClients(), loadClips(), loadLedger()]);
+  await Promise.all([loadBlockers(), loadChat(), loadMemory(), loadLog(), loadSandbox(), loadFootage(), loadClients(), loadClips(), loadLedger(), loadOutreach()]);
 }
 
 // Enter sends the chat message (Shift+Enter for a newline)

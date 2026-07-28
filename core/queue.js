@@ -105,3 +105,14 @@ export function resolveBlocker(id, resolution) {
 export function getAllBlockers() {
   return load().reverse(); // newest first
 }
+
+/**
+ * Wipe the entire blocker queue. Used for a one-time clean start after a
+ * business pivot (the 2026-07-28 Awon Video rebuild used this to clear out
+ * Rival Is Me-era product/CJ-dropshipping blockers that no longer meant
+ * anything) and exposed on the dashboard so a future pivot doesn't need a
+ * manual data fix again.
+ */
+export function clearAllBlockers() {
+  save([]);
+}
