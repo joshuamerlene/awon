@@ -2,6 +2,19 @@
 
 *Prepared July 16, 2026. Everything referenced here ships with the review-UI deploy.*
 
+> **⚠️ Likely obsolete as of the 2026-07-27 pivot to Awon Video.** This guide
+> was written when the business (then The Rival Is Me) depended on public
+> TikTok posting to its own account as the actual distribution model. Awon
+> Video's model is different on purpose: clients post finished clips through
+> THEIR OWN already-audited accounts, specifically so this business is never
+> blocked on a TikTok audit again. TikTok here is now an optional
+> portfolio/demo-reel channel only (see BRAND_DNA in core/claude.js). Before
+> spending time on a resubmission, confirm it's actually worth doing — the
+> business doesn't need it to operate, only to (optionally) show off a demo
+> reel from Awon Video's own account. Also note every `@the.rival.is.me`
+> reference below is the old handle and would need updating if this is
+> revisited.
+
 ---
 
 ## ⚠️ Read this first — the honest risk

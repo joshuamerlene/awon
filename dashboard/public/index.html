@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AWON · The Rival Is Me</title>
+<title>AWON</title>
 <style>
   :root {
     --bg: #0a0a0a;
@@ -36,6 +36,19 @@
   .dot.offline { background: var(--red); animation: none; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
   .last-cycle { font-size: 11px; color: var(--muted); }
+
+  /* ── Identity banner ── */
+  /* Added in the 2026-07-28 deep scrub: the root bug that day was Awon's
+     persisted memory silently re-planning a retired business for a full day
+     with nothing on-screen making that obvious. This banner makes the current
+     business identity and how long it's been running impossible to miss. */
+  .identity-banner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; background: linear-gradient(135deg, #141a0a, var(--surface)); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; padding: 18px 24px; margin: 20px 24px 0; }
+  .identity-name { font-size: 20px; font-weight: 800; letter-spacing: 0.03em; color: var(--text); }
+  .identity-model { font-size: 12px; color: var(--muted); margin-top: 4px; max-width: 560px; line-height: 1.4; }
+  .identity-stats { display: flex; gap: 22px; }
+  .identity-stat { text-align: center; }
+  .identity-stat .n { font-size: 18px; font-weight: 700; color: var(--accent); }
+  .identity-stat .l { font-size: 9px; color: var(--muted); letter-spacing: 0.15em; text-transform: uppercase; margin-top: 2px; }
 
   /* ── Main grid ── */
   .grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto auto; gap: 1px; background: var(--border); }
@@ -170,7 +183,7 @@
 <!-- Auth -->
 <div id="auth-overlay">
   <div class="auth-box">
-    <h2>AWON · THE RIVAL IS ME</h2>
+    <h2>AWON</h2>
     <input type="password" id="auth-input" placeholder="Dashboard password" />
     <button onclick="login()">Enter</button>
     <p id="auth-error" style="color:#ff4444;font-size:12px;margin-top:12px;display:none;">Wrong password.</p>
@@ -179,20 +192,33 @@
 
 <!-- Header -->
 <header>
-  <div class="logo">AWON · THE RIVAL IS ME OPERATIONS</div>
+  <div class="logo">AWON OPERATIONS</div>
   <div style="display:flex;align-items:center;gap:20px;">
     <div class="status-pill">
       <div class="dot" id="status-dot"></div>
       <span id="status-text">Connecting...</span>
     </div>
     <span class="last-cycle" id="last-cycle"></span>
-    <a class="refresh-btn" id="tiktok-connect-link" href="/auth/tiktok" style="display:none;text-decoration:none;">Connect TikTok →</a>
+    <a class="refresh-btn" id="tiktok-connect-link" href="/auth/tiktok" style="display:none;text-decoration:none;" title="Optional demo-reel/portfolio channel only — not part of the actual delivery model.">Connect TikTok (portfolio) →</a>
     <button class="refresh-btn" onclick="loadAll()">↻ Refresh</button>
   </div>
 </header>
 
 <!-- Main content (hidden until auth) -->
 <div id="main-content" style="display:none;">
+
+  <!-- Identity banner — always says what business this is and how long it's run -->
+  <div class="identity-banner">
+    <div>
+      <div class="identity-name" id="identity-name">Loading…</div>
+      <div class="identity-model" id="identity-model"></div>
+    </div>
+    <div class="identity-stats">
+      <div class="identity-stat"><div class="n" id="identity-cycles">—</div><div class="l">Cycles</div></div>
+      <div class="identity-stat"><div class="n" id="identity-days">—</div><div class="l">Days Live</div></div>
+      <div class="identity-stat"><div class="n" id="identity-clients">—</div><div class="l">Active Clients</div></div>
+    </div>
+  </div>
 
   <!-- Budget + Strategy row -->
   <div class="grid">
@@ -271,13 +297,13 @@
         <span class="badge green">Live</span>
       </div>
       <div class="chat-thread" id="chat-thread">
-        <div class="memory-empty">Say something — Awon replies instantly, and anything durable you tell him becomes part of how he runs the store.</div>
+        <div class="memory-empty">Say something — Awon replies instantly, and anything durable you tell him becomes part of how he runs the business.</div>
       </div>
       <div class="chat-form">
         <textarea class="chat-input" id="chat-input" placeholder="Tell Awon how it's going, what to push, what to change..." rows="1"></textarea>
         <button class="chat-send" id="chat-send" onclick="sendChat()">Send</button>
       </div>
-      <div class="chat-hint">Facts and directives you give him are saved to his living memory and steer every decision — timed ones (like "push hoodies for a week") expire on their own.</div>
+      <div class="chat-hint">Facts and directives you give him are saved to his living memory and steer every decision — timed ones (like "prioritize retainer deals over per-clip this week") expire on their own.</div>
       <div class="chat-saved" id="chat-saved"></div>
     </div>
 
@@ -334,12 +360,12 @@
     <!-- Raw Footage -->
     <div class="panel footage-panel">
       <div class="panel-header">
-        <span class="panel-title">Raw Footage For Awon To Edit</span>
+        <span class="panel-title">Portfolio Footage (Demo Reel)</span>
       </div>
       <div class="footage-drop">
         <input type="file" id="footage-input" accept=".mp4,.mov,.m4v,.zip" multiple />
         <button class="resolve-btn" onclick="uploadFootage()" style="margin-left:12px;">Upload</button>
-        <div style="font-size:11px;color:var(--muted);margin-top:8px;">mp4, mov, m4v — up to 500MB each, 50 at a time. Or drop a .zip (like a TikTok data export) and every video inside gets imported. Awon trims, splices, captions, and reframes these into TikTok posts.</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px;">mp4, mov, m4v — up to 500MB each, 50 at a time. Or drop a .zip and every video inside gets imported. This is for Awon's OWN sample/demo footage — not client work, which flows through the Client Pipeline panel below instead. Awon cuts these into a portfolio reel to show prospects the editing quality before they commit.</div>
       </div>
       <div class="footage-list" id="footage-container">
         <div style="color:var(--muted);text-align:center;padding:12px;font-size:12px;">No footage uploaded yet.</div>
@@ -418,6 +444,13 @@ async function loadStatus() {
       document.title = `AWON · ${s.businessName}`;
       document.querySelector(".logo").textContent = `AWON · ${s.businessName.toUpperCase()} OPERATIONS`;
     }
+    document.getElementById("identity-name").textContent = s.businessName || "Awon";
+    document.getElementById("identity-model").textContent = s.businessModel || "";
+    document.getElementById("identity-cycles").textContent = s.cycleCount || 0;
+    document.getElementById("identity-days").textContent = s.businessLaunchedAt
+      ? Math.max(0, Math.floor((Date.now() - new Date(s.businessLaunchedAt).getTime()) / 86400000))
+      : "—";
+    document.getElementById("identity-clients").textContent = s.activeClientCount ?? "—";
     document.getElementById("cycle-badge").textContent = `Cycle #${s.cycleCount || 0}`;
     document.getElementById("budget-available").textContent = `$${s.budget.availableBudgetUsd}`;
     document.getElementById("budget-adcap").textContent = `$${s.budget.adCapUsd}`;

@@ -9,9 +9,9 @@
  * build), and poll status for reconciliation. Retainer clients use
  * Subscriptions instead of one-off Invoices so they auto-bill on schedule.
  *
- * Raw fetch against Stripe's REST API (no SDK) — same style as
- * integrations/printful.js elsewhere in this repo. Stripe's API takes
- * form-urlencoded bodies, not JSON.
+ * Raw fetch against Stripe's REST API (no SDK, kept dependency-light like the
+ * rest of this codebase's integrations). Stripe's API takes form-urlencoded
+ * bodies, not JSON.
  *
  * Docs: https://docs.stripe.com/api/invoices, https://docs.stripe.com/api/subscriptions
  */

@@ -29,6 +29,14 @@ const MARKETING_PRINCIPLES = loadKnowledgeFile("jareds-takes.md");
 const MARKETING_COPYWRITING = loadKnowledgeFile("marketing-copywriting.md");
 const MARKETING_CONTENT = loadKnowledgeFile("marketing-content.md");
 const MARKETING_ANALYTICS = loadKnowledgeFile("marketing-analytics.md");
+// Added in the 2026-07-28 deep scrub/rebuild — this business runs on cold
+// outreach and closing deals, not blog/FB content, so the funnel, email, sales
+// letter, and lead-magnet playbooks matter here more than they did for the
+// content-heavy business this codebase was first wired for.
+const MARKETING_FUNDAMENTALS = loadKnowledgeFile("the-fundamentals.md");
+const MARKETING_EMAIL = loadKnowledgeFile("marketing-email.md");
+const MARKETING_SALES_LETTER = loadKnowledgeFile("marketing-sales-letter.md");
+const MARKETING_LEAD_MAGNETS = loadKnowledgeFile("marketing-lead-magnets.md");
 
 function marketingBlock(label, text) {
   if (!text) return "";
@@ -203,7 +211,14 @@ export async function thinkJSON({ system, prompt, maxTokens = 4096, fast = false
 // through prose. Josh: set BUSINESS_NAME in Railway once you've picked one.
 // ---------------------------------------------------------------------------
 
-const BUSINESS_NAME = process.env.BUSINESS_NAME || "[PLACEHOLDER — clip production business, rename via BUSINESS_NAME env var]";
+export const BUSINESS_NAME = process.env.BUSINESS_NAME || "[PLACEHOLDER — clip production business, rename via BUSINESS_NAME env var]";
+
+// One-line model summary for the dashboard identity banner — exists so the
+// CURRENT business model is always visible at a glance, not just the name.
+// (See the 2026-07-28 deep-scrub note in core/memory.js for why "the name
+// looked right" wasn't actually enough to catch the stale-strategy bug.)
+export const BUSINESS_MODEL_SUMMARY =
+  "Direct-service clip production: cut clients' raw footage into short-form clips; they post through their own account.";
 
 const BRAND_DNA = `
 ══════════════════════════════════════════════════════════════
@@ -274,6 +289,9 @@ export const PERSONAS = {
 
 ${BRAND_DNA}
 ${marketingBlock("Core Principles", MARKETING_PRINCIPLES)}
+${marketingBlock("Funnel Fundamentals", MARKETING_FUNDAMENTALS)}
+
+WHERE THE FREE TRIAL SITS IN THE FUNNEL: per the fundamentals above, a free trial with no payment info collected is a LEAD MAGNET, not a tripwire or the core offer — it costs the prospect nothing but their attention and a bit of trust. That means the free trial's only job is to prove the work is real and get someone into your pipeline; it is NOT where the business makes money. The ascension you're actually running is: free trial (lead magnet) → closed paying deal, per-clip or retainer (core offer). Never treat a free-trial client as "done" once delivered — the whole point was to move them to the paid ask, and if a free trial wraps without that conversation happening, the funnel step failed even if the clips were great.
 
 YOUR DRIVE — READ THIS FIRST EVERY CYCLE:
 You WANT paying clients and delivered work. Not "produce proof artifacts," not "research the market" — CLOSE DEALS AND DELIVER CLIPS. Every cycle should end one concrete step closer to: a new prospect contacted, a deal closed, an invoice sent, or clips delivered to an active client. Revenue is the scoreboard. If what you're doing this cycle doesn't trace to a client eventually paying an invoice, stop doing it and pick something that does.
@@ -307,11 +325,16 @@ You are not a script. You are an operator with a real service to sell, a scorebo
 ${BRAND_DNA}
 ${marketingBlock("Core Principles", MARKETING_PRINCIPLES)}
 ${marketingBlock("Copywriting", MARKETING_COPYWRITING)}
+${marketingBlock("Email", MARKETING_EMAIL)}
+${marketingBlock("Sales Letter (objection-handling skeleton)", MARKETING_SALES_LETTER)}
+${marketingBlock("Lead Magnets", MARKETING_LEAD_MAGNETS)}
 
 YOUR JOB:
 1. Identify real, specific prospect candidates — creators, streamers, or brands who already have a real audience and a footage backlog (long-form streams, podcasts, interviews) but no dedicated short-form clip production.
 2. Write direct, specific, non-generic cold outreach. Reference something real and specific about the prospect (a recent stream, a topic they cover, their upload cadence) — never a templated mail-merge feel.
 3. Track every contact so nobody gets pitched twice with the same angle.
+4. Once someone's in the pipeline, work them through the actual objections a prospect has before they'll hand over footage or sign a retainer (the sales-letter note lists them: don't understand my problem, are you qualified, I don't believe you, I don't need this now, it won't work for my content, what if I don't like the clips, I can't afford it). The free trial is your answer to "I don't believe you / what if I don't like it" — lead with it for someone who's never worked with you. For a warm lead who's already seen the free-trial clips, the ask shifts to closing the paid retainer or per-clip deal — don't let a good free trial delivery end in silence instead of an actual close.
+5. Follow-up cadence on a contacted-but-quiet prospect should look like the email note's automated sequences (a warm-up, not just one cold email and done) — reference something new each time, don't just repeat the same pitch.
 
 WHAT MAKES A GOOD PROSPECT:
 - Already publishing long-form content regularly (weekly+ cadence, not a one-off)

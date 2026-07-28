@@ -6,6 +6,10 @@
  * writes it back. Josh can view it in the dashboard as the "sandbox."
  *
  * Structure:
+ *   businessIdentity — the BUSINESS_NAME this memory was last written under.
+ *                       See scrubOnIdentityChange() below — this is the real
+ *                       fix for the 2026-07-28 stale-memory bug, not just the
+ *                       regex scrubs, which are kept as defense-in-depth only.
  *   strategy      — Awon's current strategic focus and reasoning
  *   experiments   — active tests and what they've taught him so far
  *   learnings     — confirmed insights Awon has locked in
@@ -13,6 +17,11 @@
  *   contentNotes  — what content formats/hooks are working
  *   subAgents     — active sub-agent assignments and status
  *   nextActions   — what Awon plans to do next cycle
+ *   businessLaunchedAt — when the CURRENT business identity went live (used by
+ *                       the time-box checkpoint in core/awon.js) — reset along
+ *                       with everything else on an identity change, since the
+ *                       checkpoint clock has to restart with the new business,
+ *                       not keep counting from the old one's launch date.
  *   updatedAt     — last write timestamp
  */
 
@@ -32,6 +41,37 @@ const DEFAULT_MEMORY = {
   cycleCount: 0,
   updatedAt: null,
 };
+
+// The BUSINESS_NAME this codebase is currently running as. Compared against
+// memory.businessIdentity on every load (see scrubOnIdentityChange) so a
+// future pivot (like Rival Is Me -> Awon Video) resets memory structurally
+// instead of relying on someone remembering to widen a regex list again.
+const CURRENT_BUSINESS_NAME = process.env.BUSINESS_NAME || "";
+
+/**
+ * The real fix for the 2026-07-28 bug: memory.json lives on the Railway
+ * volume and survives deploys BY DESIGN (so learnings aren't lost on every
+ * redeploy) — but that also means a business-identity change doesn't
+ * automatically invalidate old strategy/learnings/nextActions/experiments/
+ * subAgents/contentNotes. The RETIRED_BUSINESS_PATTERNS regex scrub below
+ * was the first fix, but it only catches fields whose exact old-business
+ * phrasing someone thought to list — anything else (an experiment record, a
+ * contentNotes entry, a subAgent assignment, a stale businessLaunchedAt
+ * driving the wrong checkpoint clock) would have sailed through untouched.
+ * This runs FIRST: if the business identity actually changed since memory
+ * was last written, do a full reset rather than trying to enumerate every
+ * place old-business residue could hide. The regex scrubs remain below as
+ * defense-in-depth for memory written before this field existed, or for a
+ * same-identity cycle where a stale belief crept back in some other way.
+ */
+function scrubOnIdentityChange(memory) {
+  if (!CURRENT_BUSINESS_NAME) return memory; // env var not set — nothing to compare against
+  if (memory.businessIdentity && memory.businessIdentity !== CURRENT_BUSINESS_NAME) {
+    return { ...DEFAULT_MEMORY, businessIdentity: CURRENT_BUSINESS_NAME };
+  }
+  if (!memory.businessIdentity) memory.businessIdentity = CURRENT_BUSINESS_NAME;
+  return memory;
+}
 
 // Stale-belief scrub. During the weeks the integrations were broken, Awon
 // locked in a set of "learnings" that are now false and actively harmful:
@@ -152,10 +192,12 @@ function scrubStaleBeliefs(memory) {
 export function loadMemory() {
   if (!fs.existsSync(MEMORY_PATH)) {
     fs.mkdirSync(path.dirname(MEMORY_PATH), { recursive: true });
-    fs.writeFileSync(MEMORY_PATH, JSON.stringify(DEFAULT_MEMORY, null, 2));
-    return { ...DEFAULT_MEMORY };
+    const fresh = { ...DEFAULT_MEMORY, businessIdentity: CURRENT_BUSINESS_NAME };
+    fs.writeFileSync(MEMORY_PATH, JSON.stringify(fresh, null, 2));
+    return fresh;
   }
-  return scrubStaleBeliefs(JSON.parse(fs.readFileSync(MEMORY_PATH, "utf-8")));
+  const onDisk = JSON.parse(fs.readFileSync(MEMORY_PATH, "utf-8"));
+  return scrubStaleBeliefs(scrubOnIdentityChange(onDisk));
 }
 
 export function saveMemory(memory) {
