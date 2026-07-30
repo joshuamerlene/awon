@@ -21,9 +21,12 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import * as email from "../integrations/email.js";
+import { log } from "./logger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QUEUE_PATH = path.join(__dirname, "..", "data", "blockers.json");
+const OWNER_EMAIL = process.env.OWNER_EMAIL || "joshuamerlene@gmail.com";
 
 function load() {
   if (!fs.existsSync(QUEUE_PATH)) {
@@ -53,6 +56,27 @@ export function addBlocker({ title, context, options = [], thread = "" }) {
   };
   queue.push(blocker);
   save(queue);
+
+  // A blocker that only shows up in the dashboard is a blocker nobody sees
+  // until they happen to open it -- exactly how the budget-exhaustion blocker
+  // sat unread for a full day. Same fire-and-forget alert pattern as the
+  // public-intake email: never blocks blocker creation if Resend isn't
+  // configured or the send fails.
+  if (email.isConfigured()) {
+    email
+      .sendEmail({
+        to: OWNER_EMAIL,
+        subject: `Awon needs you — ${title}`,
+        html:
+          `<p>Awon hit something he can't resolve on his own:</p>` +
+          `<p><strong>${title}</strong></p>` +
+          `<p>${context}</p>` +
+          (options.length ? `<p>Options: ${options.join(" | ")}</p>` : "") +
+          `<p>Respond from the dashboard's blockers panel.</p>`,
+      })
+      .catch((e) => log("error", `Blocker alert email failed: ${e.message}`));
+  }
+
   return blocker.id;
 }
 

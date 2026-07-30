@@ -166,7 +166,7 @@ Return JSON:
     log("decision", `Override: strategy skipped the clip agent despite footage waiting — running it anyway.`);
     strategy.runClipAgent = true;
   }
-  if (prospects.some(p => (p.outreach || []).length === 0) && !strategy.runOutreachAgent) {
+  if (prospects.some(p => !clients.hasBeenContacted(p)) && !strategy.runOutreachAgent) {
     log("decision", `Override: strategy skipped outreach despite un-contacted prospects — running it anyway.`);
     strategy.runOutreachAgent = true;
   }

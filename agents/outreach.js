@@ -18,6 +18,7 @@ import { think, thinkJSON, PERSONAS } from "../core/claude.js";
 import { log } from "../core/logger.js";
 import * as clients from "../core/clients.js";
 import * as email from "../integrations/email.js";
+import { addBlockerOnce } from "../core/queue.js";
 
 const MIN_UNCONTACTED_PROSPECTS = 3;
 
@@ -30,7 +31,9 @@ async function discoverProspects({ memory }) {
 
 Already in the pipeline (don't repeat these): ${existingNames.join(", ") || "none yet"}
 
-Search for candidates matching the "good prospect" criteria from your persona: real regular long-form content cadence, real audience size signal, no visible dedicated short-form/clips presence. Look for a real contact path too (a business email listed in their channel/podcast "about" page or bio is common — note it if you find one, otherwise leave contactEmail null).
+Search for candidates matching the "good prospect" criteria from your persona: real regular long-form content cadence, real audience size signal, no visible dedicated short-form/clips presence.
+
+Then actively search for a real way to reach them — this is the part that determines whether outreach can actually be sent, not just drafted. Check their dedicated "Contact," "Advertise," "Press," "Sponsorship," or "Business Inquiries" page specifically — that's where a real business email usually lives, not the About/bio page (creators rarely put a direct email there). If you genuinely can't find an email after checking those, note their most active social handle (X/Instagram/YouTube) instead so there's still a real path to reach them manually.
 
 Return JSON:
 {
@@ -39,7 +42,8 @@ Return JSON:
       "name": "the real creator/show/brand name you found",
       "sourceChannel": "where you found them, e.g. \\"YouTube search\\", \\"podcast directory\\"",
       "signal": "the specific real detail that made them a candidate — reference what you actually found",
-      "contactEmail": "an actual email you found, or null",
+      "contactEmail": "an actual email you found (check contact/advertise/press pages, not just bio), or null",
+      "socialHandle": "their most active social handle/platform if no email was found, else null",
       "notes": "1-2 sentences a human could verify — what they publish, roughly how often, why no clips presence yet"
     }
   ]
@@ -57,7 +61,8 @@ Only include candidates you actually found via search this turn — never fabric
       name: candidate.name,
       contactEmail: candidate.contactEmail || null,
       sourceChannel: candidate.sourceChannel || "web-search",
-      notes: `${candidate.signal || ""} ${candidate.notes || ""}`.trim(),
+      notes: (`${candidate.signal || ""} ${candidate.notes || ""}` +
+        `${candidate.socialHandle && !candidate.contactEmail ? ` Reachable via ${candidate.socialHandle} (no email found).` : ""}`).trim(),
     });
     added++;
     log("action", `Discovered prospect via web search: "${candidate.name}" (${candidate.sourceChannel || "web"}).`);
@@ -69,7 +74,7 @@ export async function runOutreachAgent({ memory }) {
   log("sub-agent", "Outreach agent starting...");
 
   let discovered = 0;
-  const uncontactedCount = clients.getProspects().filter((p) => (p.outreach || []).length === 0).length;
+  const uncontactedCount = clients.getUncontactedProspects().length;
   if (uncontactedCount < MIN_UNCONTACTED_PROSPECTS) {
     try {
       discovered = await discoverProspects({ memory });
@@ -78,7 +83,7 @@ export async function runOutreachAgent({ memory }) {
     }
   }
 
-  const prospects = clients.getProspects().filter((p) => (p.outreach || []).length === 0);
+  const prospects = clients.getUncontactedProspects();
 
   if (prospects.length === 0) {
     const msg = discovered === 0
@@ -91,6 +96,21 @@ export async function runOutreachAgent({ memory }) {
   let drafted = 0, sent = 0;
 
   for (const prospect of prospects) {
+    // A prospect that's already had 2 failed draft-only attempts isn't going
+    // to find its own contact info on a 3rd identical search -- that's how
+    // every prospect was quietly re-discovered and re-drafted before this
+    // fix. Stop burning budget on repeats and put it in front of Josh once.
+    const priorAttempts = (prospect.outreach || []).length;
+    if (priorAttempts >= 2) {
+      addBlockerOnce({
+        title: `No send channel found for prospect "${prospect.name}"`,
+        context: `Awon has tried ${priorAttempts} time(s) to reach "${prospect.name}" but web search never turned up an email to send to. ` +
+          `Notes on file: ${prospect.notes || "none"}`,
+        options: ["Add a contact email on the dashboard's Client Pipeline panel", "Drop this prospect"],
+        thread: "Once a contact email is added, the next cycle will pick this prospect back up and actually send outreach.",
+      });
+      continue;
+    }
     try {
       const copy = await think({
         system: PERSONAS.outreachAgent,

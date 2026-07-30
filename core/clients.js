@@ -79,9 +79,25 @@ export function logOutreach(id, { channel, summary }) {
   const client = clients.find((c) => c.id === id);
   if (!client) throw new Error(`Client ${id} not found.`);
   client.outreach.push({ date: new Date().toISOString(), channel, summary });
-  if (client.status === "prospect") client.status = "contacted";
+  // Only a REAL send moves a prospect out of the pool future cycles re-check.
+  // A "draft-only" entry (no contact info found, or sending unconfigured)
+  // never actually reached anyone -- flipping status here would silently
+  // and permanently drop them from getProspects()/getUncontactedProspects(),
+  // which is exactly what was happening to every discovered prospect before
+  // this fix (0 of them were ever retried after one failed attempt).
+  if (client.status === "prospect" && channel !== "draft-only") client.status = "contacted";
   save(clients);
   return client;
+}
+
+/** True once a real outreach message has actually gone out (not just drafted). */
+export function hasBeenContacted(client) {
+  return (client.outreach || []).some((o) => o.channel && o.channel !== "draft-only");
+}
+
+/** Prospects nobody has actually reached yet -- includes ones with failed/draft-only attempts. */
+export function getUncontactedProspects() {
+  return getProspects().filter((c) => !hasBeenContacted(c));
 }
 
 export function attachInvoice(id, { invoiceId, amountUsd, hostedInvoiceUrl }) {
