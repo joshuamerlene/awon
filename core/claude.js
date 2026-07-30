@@ -108,14 +108,14 @@ function estimateCostUsd(model, usage) {
 // recording nothing. Token cost from a web-search-enabled call IS tracked
 // (below); the search tool's own fee is not, and the transaction note says
 // so explicitly so this doesn't read as "fully tracked" when it isn't.
-function recordThinkingCost(model, usage, webSearch) {
+function recordThinkingCost(model, usage, webSearch, category) {
   try {
     const cost = estimateCostUsd(model, usage);
     if (cost <= 0) return;
     const ledger = new Ledger();
     ledger.recordSpendUnconditional(
       cost,
-      "anthropic_api",
+      category,
       `${model} — ${usage.input_tokens || 0} in / ${usage.output_tokens || 0} out tokens${webSearch ? " (+ web search calls, fee not included — price unconfirmed)" : ""}`
     );
   } catch { /* cost tracking must never break the actual response */ }
@@ -141,7 +141,7 @@ function webSearchTool() {
  * first, or a search-triggering call returns the pre-search preamble instead
  * of the answer.
  */
-export async function think({ system, prompt, maxTokens = 4096, fast = false, webSearch = false }) {
+export async function think({ system, prompt, maxTokens = 4096, fast = false, webSearch = false, category = "anthropic_api" }) {
   const model = fast ? MODELS.fast : MODELS.strategic;
   const response = await getClient().messages.create({
     model,
@@ -150,7 +150,7 @@ export async function think({ system, prompt, maxTokens = 4096, fast = false, we
     messages: [{ role: "user", content: prompt }],
     ...(webSearch ? { tools: [webSearchTool()] } : {}),
   });
-  recordThinkingCost(model, response.usage, webSearch);
+  recordThinkingCost(model, response.usage, webSearch, category);
   const textBlocks = response.content.filter((b) => b.type === "text");
   const block = textBlocks[textBlocks.length - 1];
   return block ? block.text.trim() : "";
@@ -179,9 +179,9 @@ function parseLooseJSON(raw) {
   }
 }
 
-export async function thinkJSON({ system, prompt, maxTokens = 4096, fast = false, webSearch = false }) {
+export async function thinkJSON({ system, prompt, maxTokens = 4096, fast = false, webSearch = false, category = "anthropic_api" }) {
   const baseSystem = `${system}\n\nIMPORTANT: Respond with ONLY valid JSON. No markdown, no explanation outside the JSON object. Every double-quote INSIDE a string value must be escaped as \\".${webSearch ? " Do any web searches you need FIRST, then return only the final JSON — no prose before or after it." : ""}`;
-  let raw = await think({ system: baseSystem, prompt, maxTokens, fast, webSearch });
+  let raw = await think({ system: baseSystem, prompt, maxTokens, fast, webSearch, category });
   try {
     return parseLooseJSON(raw);
   } catch (e1) {
@@ -193,6 +193,7 @@ export async function thinkJSON({ system, prompt, maxTokens = 4096, fast = false
       maxTokens,
       fast,
       webSearch,
+      category,
     });
     return parseLooseJSON(raw);
   }

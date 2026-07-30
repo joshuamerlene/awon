@@ -25,6 +25,14 @@ const LEDGER_PATH = path.join(__dirname, "..", "data", "ledger.json");
 // kept as a fallback alias in case it's ever used instead — whichever is set wins.
 const STARTING_BUDGET = Number(process.env.STARTING_BUDGET_USD || process.env.BASE_BUDGET_USD || 10);
 
+// A real per-cycle ceiling on prospecting spend specifically (discovery +
+// outreach drafting) -- separate from the overall budget circuit breaker in
+// awon.js, which only stops the whole agent once EVERYTHING is gone. Without
+// this, one cycle that discovers several new prospects and drafts outreach
+// for all of them can burn through most of a funding round in a single
+// session, which is exactly what happened before this cap existed.
+const PROSPECTING_BUDGET_PER_CYCLE_USD = Number(process.env.PROSPECTING_BUDGET_PER_CYCLE_USD || 1);
+
 const DEFAULT_STATE = {
   baseBudgetUsd: STARTING_BUDGET,
   availableBudgetUsd: STARTING_BUDGET,
@@ -60,6 +68,14 @@ export class Ledger {
   refresh() { this.state = load(); return this.state; }
   getAvailable() { return this.state.availableBudgetUsd; }
   getAdCap() { return (this.state.adSubBudgetMaxPercent / 100) * this.state.availableBudgetUsd; }
+  getProspectingCapPerCycleUsd() { return PROSPECTING_BUDGET_PER_CYCLE_USD; }
+
+  /** Total spend in a category since a given ISO timestamp (e.g. the current cycle's start). */
+  getCategorySpendSince(category, sinceIso) {
+    return this.state.transactions
+      .filter((t) => t.type === "spend" && t.category === category && t.date >= sinceIso)
+      .reduce((s, t) => s + t.amount, 0);
+  }
 
   canSpend(amount, category) {
     if (amount <= 0) return { allowed: false, reason: "Amount must be positive." };
@@ -151,6 +167,11 @@ export class Ledger {
       cumulativeSpendUsd: +this.state.cumulativeSpendUsd.toFixed(2),
       cumulativeFundedUsd: +(this.state.cumulativeFundedUsd || 0).toFixed(2),
       adCapUsd: +this.getAdCap().toFixed(2),
+      prospectingCapPerCycleUsd: +this.getProspectingCapPerCycleUsd().toFixed(2),
+      prospectingSpentAllTimeUsd: +this.state.transactions
+        .filter((t) => t.type === "spend" && t.category === "prospecting")
+        .reduce((s, t) => s + t.amount, 0)
+        .toFixed(2),
       txCount: this.state.transactions.length,
     };
   }

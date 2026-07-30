@@ -19,8 +19,13 @@ import { log } from "../core/logger.js";
 import * as clients from "../core/clients.js";
 import * as email from "../integrations/email.js";
 import { addBlockerOnce } from "../core/queue.js";
+import { Ledger } from "../core/ledger.js";
 
 const MIN_UNCONTACTED_PROSPECTS = 3;
+// Deterministic backstop regardless of $ cost per prospect -- caps how many
+// brand-new prospects one cycle can discover-and-draft for in a single go,
+// which is how a single session blew through nearly the whole budget before.
+const MAX_PROSPECTS_PER_CYCLE = 3;
 
 async function discoverProspects({ memory }) {
   const existingNames = clients.getAllClients().map((c) => c.name);
@@ -52,6 +57,7 @@ Return JSON:
 Only include candidates you actually found via search this turn — never fabricate a name, a stat, or an email. If search doesn't turn up anything solid, return an empty candidates array rather than inventing one.`,
     webSearch: true,
     fast: false,
+    category: "prospecting",
   });
 
   let added = 0;
@@ -73,6 +79,10 @@ Only include candidates you actually found via search this turn — never fabric
 export async function runOutreachAgent({ memory }) {
   log("sub-agent", "Outreach agent starting...");
 
+  const ledger = new Ledger();
+  const cycleStartIso = new Date().toISOString();
+  const prospectingCap = ledger.getProspectingCapPerCycleUsd();
+
   let discovered = 0;
   const uncontactedCount = clients.getUncontactedProspects().length;
   if (uncontactedCount < MIN_UNCONTACTED_PROSPECTS) {
@@ -83,7 +93,9 @@ export async function runOutreachAgent({ memory }) {
     }
   }
 
-  const prospects = clients.getUncontactedProspects();
+  // MAX_PROSPECTS_PER_CYCLE is the deterministic backstop; the $ check inside
+  // the loop below is the real-cost backstop -- either one can trigger first.
+  const prospects = clients.getUncontactedProspects().slice(0, MAX_PROSPECTS_PER_CYCLE);
 
   if (prospects.length === 0) {
     const msg = discovered === 0
@@ -93,9 +105,19 @@ export async function runOutreachAgent({ memory }) {
     return { summary: msg, discovered, drafted: 0, sent: 0 };
   }
 
-  let drafted = 0, sent = 0;
+  let drafted = 0, sent = 0, capHit = false;
 
   for (const prospect of prospects) {
+    // Real hard stop on prospecting spend for THIS cycle -- checked fresh
+    // before every prospect, not just once, since each draft call's actual
+    // cost isn't known until after it runs. Whatever's left over waits for
+    // next cycle; nothing here is lost, just deferred.
+    const spentThisCycle = ledger.getCategorySpendSince("prospecting", cycleStartIso);
+    if (spentThisCycle >= prospectingCap) {
+      capHit = true;
+      log("sub-agent", `Prospecting cap hit — $${spentThisCycle.toFixed(2)} spent this cycle vs. a $${prospectingCap.toFixed(2)} cap. Deferring remaining prospect(s) to next cycle.`);
+      break;
+    }
     // A prospect that's already had 2 failed draft-only attempts isn't going
     // to find its own contact info on a 3rd identical search -- that's how
     // every prospect was quietly re-discovered and re-drafted before this
@@ -124,6 +146,7 @@ Write the email body as clean HTML (short <p> tags only, no images, no heavy for
 
 Return ONLY the HTML email body. No subject line, no commentary.`,
         fast: false,
+        category: "prospecting",
       });
 
       drafted++;
@@ -146,7 +169,8 @@ Return ONLY the HTML email body. No subject line, no commentary.`,
     }
   }
 
-  const summary = `${discovered} new prospect(s) discovered, ${drafted} outreach draft(s) written, ${sent} actually sent.`;
+  const summary = `${discovered} new prospect(s) discovered, ${drafted} outreach draft(s) written, ${sent} actually sent.` +
+    (capHit ? ` Stopped early — hit this cycle's $${prospectingCap.toFixed(2)} prospecting cap.` : "");
   log("sub-agent", `Outreach agent done. ${summary}`);
-  return { summary, discovered, drafted, sent };
+  return { summary, discovered, drafted, sent, capHit };
 }
